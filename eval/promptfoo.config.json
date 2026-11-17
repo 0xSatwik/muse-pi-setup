@@ -1,0 +1,283 @@
+{
+  "description": "15 shared bounded tasks, 6 Pi endpoints, deterministic assertions",
+  "prompts": [
+    "{{prompt}}"
+  ],
+  "providers": [
+    {
+      "id": "openai:chat:xingchi/gpt-6-astra",
+      "label": "xingchi/gpt-6-astra",
+      "config": {
+        "apiBaseUrl": "http://127.0.0.1:18765/v1",
+        "apiKeyEnvar": "XINGCHI_API_KEY",
+        "temperature": 0,
+        "max_tokens": 768
+      }
+    },
+    {
+      "id": "openai:chat:xingchi/gpt-6.1-sol",
+      "label": "xingchi/gpt-6.1-sol",
+      "config": {
+        "apiBaseUrl": "http://127.0.0.1:18765/v1",
+        "apiKeyEnvar": "XINGCHI_API_KEY",
+        "temperature": 0,
+        "max_tokens": 768
+      }
+    },
+    {
+      "id": "openai:chat:tokenlab/DeepSeek-V4.1-Flash",
+      "label": "tokenlab/DeepSeek-V4.1-Flash",
+      "config": {
+        "apiBaseUrl": "http://127.0.0.1:18765/v1",
+        "apiKeyEnvar": "TOKENLAB_API_KEY",
+        "temperature": 0,
+        "max_tokens": 768
+      }
+    },
+    {
+      "id": "openai:chat:moss/nex-n2.6",
+      "label": "moss/nex-n2.6",
+      "config": {
+        "apiBaseUrl": "http://127.0.0.1:18765/v1",
+        "apiKeyEnvar": "MOSS_API_KEY",
+        "temperature": 0,
+        "max_tokens": 768
+      }
+    },
+    {
+      "id": "openai:chat:howtofix/deepSeek-v4.1-flash-1017-sg",
+      "label": "howtofix/deepSeek-v4.1-flash-1017-sg",
+      "config": {
+        "apiBaseUrl": "http://127.0.0.1:18765/v1",
+        "apiKeyEnvar": "HOWTOFIX_API_KEY",
+        "temperature": 0,
+        "max_tokens": 768
+      }
+    },
+    {
+      "id": "openai:chat:100milionseek/deepseek-v4.1-flash-free",
+      "label": "100milionseek/deepseek-v4.1-flash-free",
+      "config": {
+        "apiBaseUrl": "http://127.0.0.1:18765/v1",
+        "apiKeyEnvar": "HMS_API_KEY",
+        "temperature": 0,
+        "max_tokens": 768
+      }
+    }
+  ],
+  "tests": [
+    {
+      "description": "coding/python-dedupe",
+      "vars": {
+        "prompt": "Write Python function dedupe(xs) that preserves first occurrence order for a list of hashable items. Return only Python code.",
+        "task": "python-dedupe",
+        "expected": "[\"def dedupe\", \"return\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "coding/sql-left-join",
+      "vars": {
+        "prompt": "Tables users(id) and orders(id,user_id). Write SQL returning every user id and their order count including users with zero orders. Output only SQL.",
+        "task": "sql-left-join",
+        "expected": "[\"LEFT JOIN\", \"COUNT\", \"GROUP BY\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "coding/python-bug",
+      "vars": {
+        "prompt": "What does Python print?\ndef f(x, acc=[]):\n    acc.append(x)\n    return acc\nf(1)\nprint(f(2))\nReply only with the printed list.",
+        "task": "python-bug",
+        "expected": "[\"[1, 2]\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "reasoning/probability",
+      "vars": {
+        "prompt": "A fair coin is tossed 3 times. What is the probability of exactly two heads? Reply only as a reduced fraction.",
+        "task": "probability",
+        "expected": "[\"3/8\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "reasoning/algebra",
+      "vars": {
+        "prompt": "A notebook and a pen cost $5.50 together. The notebook costs $4.50 more than the pen. What is the pen price in dollars? Reply only with a number.",
+        "task": "algebra",
+        "expected": "[\"0.50\", \"0.5\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "reasoning/ordering",
+      "vars": {
+        "prompt": "Ada finished before Bo. Cy finished after Bo but before Di. Who finished third? Reply with only the name.",
+        "task": "ordering",
+        "expected": "[\"Cy\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "factual/capital",
+      "vars": {
+        "prompt": "What is the capital of Australia? Reply with only the city name.",
+        "task": "capital",
+        "expected": "[\"Canberra\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "factual/element",
+      "vars": {
+        "prompt": "What chemical element has atomic number 74? Reply with only the English element name.",
+        "task": "element",
+        "expected": "[\"Tungsten\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "factual/date",
+      "vars": {
+        "prompt": "In what year did the Berlin Wall open? Reply only with the four-digit year.",
+        "task": "date",
+        "expected": "[\"1989\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "instruction/json",
+      "vars": {
+        "prompt": "Return exactly one JSON object with keys name and count, values maple and 3 respectively. No prose or markdown.",
+        "task": "json",
+        "expected": "[\"json\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "instruction/sort",
+      "vars": {
+        "prompt": "Sort pear, apple, banana alphabetically. Reply with lowercase words joined by commas and no spaces.",
+        "task": "sort",
+        "expected": "[\"apple,banana,pear\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "instruction/word-count",
+      "vars": {
+        "prompt": "Write exactly six words about rain. Do not use the words wet or water. Output only the sentence.",
+        "task": "word-count",
+        "expected": "[\"six\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "summary/incident",
+      "vars": {
+        "prompt": "Summarize in at most 35 words, preserving cause, impact, resolution and follow-up: At 09:00 UTC a faulty cache rollout caused checkout errors for 12 minutes. Rolling back restored service at 09:12 UTC. No payment data was lost. The team will add canary tests.",
+        "task": "incident",
+        "expected": "[\"cache\", \"12\", \"roll\", \"canary\", \"no\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "summary/decision",
+      "vars": {
+        "prompt": "Summarize in at most 30 words: The committee considered moving the launch to May. It rejected that proposal. The launch remains June 10, with the same scope. Priya owns accessibility checks, due June 3.",
+        "task": "decision",
+        "expected": "[\"June 10\", \"Priya\", \"June 3\", \"accessibility\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    },
+    {
+      "description": "summary/uncertainty",
+      "vars": {
+        "prompt": "Summarize in at most 25 words, retaining uncertainty: In a preliminary observational study of 40 adults, participants who walked daily reported better sleep. The study cannot establish causation and has not been peer reviewed.",
+        "task": "uncertainty",
+        "expected": "[\"40\", \"sleep\", \"caus\", \"peer\"]"
+      },
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://assertions.cjs"
+        }
+      ]
+    }
+  ],
+  "evaluateOptions": {
+    "maxConcurrency": 3
+  }
+}
