@@ -1,0 +1,10 @@
+# Secrets — never commit these. The .example files show the shape.
+gateway-token.txt
+provider-keys.env
+tailnet-url.txt
+public-url.txt
+*.env
+*token*.txt
+*secret*.txt
+__pycache__/
+*.pyc
