@@ -12,6 +12,27 @@ over Tailscale (primary) and a file-queue bridge over the Altare Files
 API (fallback). Pi never sees your keys for other services — for that,
 see the companion vault below.
 
+## Start here — one prompt, two scripts
+
+**If you are a friend who got this repo:** paste
+[`SETUP-PROMPT.md`](SETUP-PROMPT.md) to your Muse. It asks you the
+questions up front (Altare, Tailscale, model keys), tells your Muse
+what to save where, what needs the browser, and every Tailscale gotcha
+we already hit — then your Muse runs the setup with the scripts.
+
+- `setup-muse.sh` — run on the Muse VM. Installs the bridge files,
+  search + skill, generates the gateway token, builds the sandbox
+  bundle, uploads it (if `ALTARE_TEAM`/`ALTARE_SERVER` are set), and
+  finishes with `--tailnet <ip>` (writes `tailnet-url.txt`, runs the
+  health check). Tested end to end, both modes.
+- `setup-sandbox.sh` — run on the sandbox as root in the web console
+  (`bash /root/work/setup/setup-sandbox.sh`). Installs Node 22 + Pi
+  1.5.2 + Tailscale, places the bundle, starts everything in tmux,
+  prints the tailnet IP. Every step verifies itself and stops loudly
+  if it fails. Verified command-by-command against the live system;
+  it has not been run end to end on a fresh sandbox yet (there is only
+  one sandbox), and it is idempotent, so re-running it is safe.
+
 ## What this is for
 
 - You want a second coding agent that runs 24/7 on a free box.
@@ -226,22 +247,53 @@ retries after 65 seconds.
 
 ### 5. Tailscale (the primary path)
 
-1. Install Tailscale on the sandbox and on the Muse VM, and join both
-   to the same tailnet.
-2. Note the sandbox's tailnet IP. Save it as
+The sandbox has **no `/dev/net/tun`** and fakes root (real uid 999),
+so Tailscale runs in userspace mode with a config fix. The exact
+working setup (verified live, full report in
+`docs/tailscale-facts.md`):
+
+1. Install from the official APT repo (Tailscale 1.104.7):
+   `curl -fsSL https://tailscale.com/install.sh | sh`
+2. Write `/root/tailscale/tailscaled.conf`:
+   `{"Version": "alpha0", "Locked": false, "OperatorUser": "container"}`
+   (`OperatorUser` is the fix for the fake-root LocalAPI refusals.)
+3. Start the daemon in tmux session `tailscaled`:
+   `tailscaled --tun=userspace-networking
+   --state=/root/tailscale/tailscaled.state
+   --socket=/root/tailscale/tailscaled.sock
+   --config=/root/tailscale/tailscaled.conf`
+4. Log in (interactive — it prints a URL the user opens to approve
+   the device, named e.g. `pi-altare`):
+   `tailscale --socket=/root/tailscale/tailscaled.sock up
+   --operator=container --hostname=pi-altare`
+5. Note the sandbox's tailnet IP (`tailscale
+   --socket=/root/tailscale/tailscaled.sock ip -4`). Save it as
    `bridge/tailnet-url.txt` next to `pi-api.py`, in the form
    `http://<sandbox-tailnet-ip>:8765` (a template is in
    `bridge/tailnet-url.txt.example`).
-3. The **first** request to a new tailnet address needs one user
+6. The **first** request to a new tailnet address needs one user
    approval — the user approves it once, then it works.
-4. From the Muse VM, a direct connection to the tailnet IP comes back
+7. From the Muse VM, a direct connection to the tailnet IP comes back
    empty — `pi-api.py` routes it through the VM's tunnel proxy on
    port 3130 (derived from `HTTPS_PROXY`, overridable with
-   `PI_GATEWAY_PROXY`). Do not remove that logic.
-5. Fallback: a cloudflared tunnel on the sandbox gives a public URL
-   (save it as `bridge/public-url.txt`). Note: some Muse VMs get 403
-   on `trycloudflare.com` from their egress proxy, so the tunnel is a
-   fallback only, not the primary path.
+   `PI_GATEWAY_PROXY`). Do not remove that logic, and do not test the
+   gateway with plain `curl` to the tailnet IP — test with
+   `pi-api.py health`.
+8. **Gotcha:** plain `tailscale status` fails on the sandbox (it talks
+   to the default socket, which this daemon does not use). Every
+   `tailscale` command there must pass
+   `--socket=/root/tailscale/tailscaled.sock`.
+9. **No Tailscale Serve needed:** the gateway listens on 127.0.0.1:8765
+   only, and in userspace mode the daemon forwards incoming tailnet
+   connections to the same port on localhost.
+10. **Restart order after a sandbox reboot:** tailscaled → login/status
+    → gateway → watcher → cloudflared tunnel. All four tmux sessions
+    (`tailscaled`, `pi-gateway`, `pi-bridge`, `pi-tunnel`) must be
+    restarted; there is no systemd.
+11. Fallback: a cloudflared tunnel on the sandbox gives a public URL
+    (save it as `bridge/public-url.txt`). Note: some Muse VMs get 403
+    on `trycloudflare.com` from their egress proxy, so the tunnel is a
+    fallback only, not the primary path.
 
 Check: `pi-api.py health` returns `{"ok": true}`.
 
@@ -384,6 +436,23 @@ howtofix was down, Xingchi unscored by the harnesses.
   session can be progressing while events look frozen.
 - **One session per topic.** Fresh sessions lose context; the registry
   is the source of truth, not the gateway's session list.
+- **Pi can return empty — verify the file, not the reply.** On
+  file-writing tasks Pi has returned empty three times in one topic
+  (the session ends, no text, no file). Always have Pi write results
+  to a file and check the file exists; if a session goes empty twice,
+  start a fresh session for that topic.
+- **The gateway token variable is `PI_GATEWAY_TOKEN`.** The gateway
+  reads exactly that name from `/root/pi-bridge/gateway.env`. A file
+  that says `GATEWAY_TOKEN=` does nothing — the gateway exits with
+  "no PI_GATEWAY_TOKEN". (This bug was caught while writing the setup
+  scripts; the scripts write the right name.)
+- **The watcher reads model keys from `/root/.profile`, the gateway
+  reads them from `/root/pi-bridge/provider-keys.env`.** Both files
+  must have the keys, or one of the two paths silently has no models.
+- **The Monid credentials file format matters.** `web.py` reads it
+  with the regex `key:\s*"([^"]+)"` — the file must contain
+  `key: "<value>"` (with quotes). A file that says `api_key: <value>`
+  is silently ignored and search returns nothing.
 
 ## Security
 
@@ -407,6 +476,9 @@ howtofix was down, Xingchi unscored by the harnesses.
 
 ```text
 README.md            this guide
+SETUP-PROMPT.md      the single prompt a friend pastes to their Muse
+setup-muse.sh        Muse-VM setup script (tested end to end)
+setup-sandbox.sh     sandbox setup script (run in the web console)
 LICENSE              MIT
 AGENTS.md            the author's operating manual: delegation, search, lessons
 DELEGATION.md        the Pi delegation + sessions rules
@@ -431,6 +503,7 @@ skills/
 docs/
   pi-per-model-settings-applied.md
   atria-recheck-20261117.md
+  tailscale-facts.md     live Tailscale inspection report (account redacted)
   research/          the Cloudflare-vault research reports
 eval/
   promptfoo.config.json, assertions.cjs   promptfoo setup
