@@ -1,0 +1,6 @@
+{
+  "rule": "One Pi session per topic. Reuse the topic's session; never start fresh when one exists. Compact when long; fresh start only if a session dies or gets confused. Prefer xingchi/gpt-6.1-sol for long sessions.",
+  "topics": {},
+  "updated": "",
+  "version": 1
+}
