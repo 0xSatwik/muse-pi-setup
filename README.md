@@ -223,6 +223,13 @@ The six models this setup was built with (all OpenAI-compatible):
 | howtofix | deepSeek-v4.1-flash-1017-sg | https://api.howtofix.id/v1 | `HOWTOFIX_API_KEY` |
 | 100milionseek | deepseek-v4.1-flash-free | https://100milionseek.top/v1 | `HMS_API_KEY` |
 
+**Default model:** Pi uses the first model listed in `models.json`
+when no `--model` is given — here that is
+100milionseek/deepseek-v4.1-flash-free. To change the default,
+reorder the providers in `models.json` (on the box and in this repo)
+and restart the gateway (`pi-api.py restart`), then verify with a
+`pi-api.py prompt "..."` call with no `--model` flag.
+
 Keys go in **two** places on the box (both `chmod 600`, both
 box-only):
 
@@ -274,8 +281,11 @@ Check: `pi-api.py models` lists all six. Then test each one:
 - **moss dies empty on long sessions** (twice returned empty content
   and died without saving on 80+ message runs). Prefer
   xingchi/gpt-6.1-sol for long, multi-step work.
-- **100milionseek keys can die without warning** (one key 401'd
-  mid-test). If a model starts 401ing, rotate its key.
+- **100milionseek keys can die without warning** (two keys so far:
+  one 401'd mid-test, another after ~32 hours of working fine). If a
+  model starts 401ing, rotate its key — generate a fresh one on the
+  dashboard and set it with `pi-api.py setkey HMS_API_KEY` (key via
+  stdin), then restart the gateway.
 
 ### 4. Install the bridge and the gateway on the box
 
