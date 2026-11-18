@@ -6,7 +6,9 @@ the flaky Altare Files API. One Pi RPC subprocess per session
 (`pi --mode rpc`), JSONL commands in, events out. Stdlib only.
 
 Auth: Bearer token from /root/pi-bridge/gateway.env (PI_GATEWAY_TOKEN=...).
-Listen: 127.0.0.1:8765 (cloudflared exposes it publicly).
+Listen: 127.0.0.1:8765 by default (PI_GATEWAY_HOST / PI_GATEWAY_PORT
+override it). On Hoody the gateway binds 0.0.0.0 so the Hoody proxy can
+reach it; a tunnel or the tailnet exposes it publicly otherwise.
 
 Endpoints (all except /health need Authorization: Bearer <token>):
   GET  /health
@@ -48,6 +50,7 @@ SESSIONS_DIR = os.path.expanduser("~/.pi/agent/sessions")
 MODELS_JSON = os.path.expanduser("~/.pi/agent/models.json")
 KEYS_FILE = os.path.join(BASE, "provider-keys.env")  # chmod 600, KEY=VALUE lines
 PORT = int(os.environ.get("PI_GATEWAY_PORT", "8765"))
+HOST = os.environ.get("PI_GATEWAY_HOST", "127.0.0.1")
 
 
 def load_keys_file():
@@ -470,5 +473,5 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"pi-gateway listening on 127.0.0.1:{PORT}", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
+    print(f"pi-gateway listening on {HOST}:{PORT}", flush=True)
+    ThreadingHTTPServer((HOST, PORT), H).serve_forever()
