@@ -81,7 +81,9 @@
             "output": 0,
             "cacheRead": 0,
             "cacheWrite": 0
-          }
+          },
+          "type": "classifier",
+          "contextWindow": 32000
         }
       ],
       "api": "openai-completions",
