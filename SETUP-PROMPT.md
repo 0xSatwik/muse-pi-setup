@@ -248,8 +248,19 @@ public (no login). Monid signup is a website if you need a key.
    `unlock_required` — that locked answer is the success state.
 7. **Jev note:** 100milionseek's `jev-1.13-free` is a classifier
    (scoring/judging), not a chat model. Pi reaches classifiers
-   through its codemode tool (`models.classify`) — do not add it
-   as a chat model in `models.json`.
+   through its codemode tool (`models.classify`). In `models.json`
+   it belongs as a classifier entry (`"api": "typesafe-system-one"`,
+   `baseUrl` = the provider's `/v1/systemone` endpoint — the repo's
+   `pi/models.json` already carries it), never as a chat model, and
+   `pi/settings.json` enables the tool (`"defaultTools":
+   ["+codemode"]`).
+8. **Pi skills:** the setup scripts install `pi-skills/` into
+   `/root/.pi/agent/skills/` on the box — `pi-system` (Pi's
+   always-read operating manual: models, key locations, combined
+   search, the vault's request-only + unlock rules, the Admin page,
+   Hallmark, honesty rules — no secrets in it) and `jev-scoring`
+   (when/how to call Jev). Verify both `SKILL.md` files exist on
+   the box before declaring setup done.
 
 ## 5. Host gotchas — read before touching the host
 
