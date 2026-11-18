@@ -618,6 +618,28 @@ with `PI_GATEWAY_HOST=0.0.0.0`), or the URL is wrong (re-derive it
 from the terminal URL). If both fail, check the tmux sessions on the
 box (`tmux ls` — `pi-gateway` and `pi-bridge` must both be alive).
 
+## Pi packages (context, MCP, memory, code feedback)
+
+Four Pi packages are part of the standard setup — one per layer, no
+overlap, and **pi-hermes-memory is the only memory system** (never add a
+second one):
+
+- **context-mode** — sandboxed code execution + an FTS5 index so big
+  tool outputs stay out of the context window (needs **Node ≥ 24.15**;
+  see the Node 24 install in PACKAGES.md).
+- **pi-mcp-adapter** — replaces Pi's built-in MCP with a single proxy
+  tool; needs `+codemode` in `defaultTools` for the vault pattern.
+- **pi-hermes-memory** — durable memory, policy-only by default: a tiny
+  capped Markdown core (193 bytes measured) + SQLite FTS5 history, and
+  recall via `memory_search` costs a few hundred tokens, not a dump.
+- **pi-lens** — LSP/linter feedback on every edit (approve its blocked
+  `@ast-grep/cli` install script after installing).
+
+Full install steps, the overlap rules, storage measurements, and the
+**problems faced** log (Node version-picker crash, missing `xz`,
+blocked postinstall, cold-LSP timeout, vault `key_label` gotcha, and
+more) are in [PACKAGES.md](PACKAGES.md).
+
 ## Optional: the secrets vault
 
 If Pi needs to call GitHub or any other API, do **not** give it the
