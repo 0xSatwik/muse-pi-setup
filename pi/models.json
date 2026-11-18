@@ -1,37 +1,13 @@
 {
   "providers": {
-    "100milionseek": {
-      "api": "openai-completions",
-      "apiKey": "$HMS_API_KEY",
-      "baseUrl": "https://100milionseek.top/v1",
-      "models": [
-        {
-          "contextWindow": 198000,
-          "id": "deepseek-v4.1-flash-free",
-          "maxTokens": 65536
-        }
-      ]
-    },
-    "howtofix": {
-      "api": "openai-completions",
-      "apiKey": "$HOWTOFIX_API_KEY",
-      "baseUrl": "https://api.howtofix.id/v1",
-      "models": [
-        {
-          "contextWindow": 128000,
-          "id": "deepSeek-v4.1-flash-1017-sg",
-          "maxTokens": 16384
-        }
-      ]
-    },
     "moss": {
       "api": "openai-completions",
       "apiKey": "$MOSS_API_KEY",
       "baseUrl": "https://api.mosi.cn/v1",
       "models": [
         {
-          "contextWindow": 128000,
           "id": "nex-n2.6",
+          "contextWindow": 128000,
           "maxTokens": 16384
         }
       ]
@@ -42,8 +18,8 @@
       "baseUrl": "https://api.tokenlab.amd.com/v1",
       "models": [
         {
-          "contextWindow": 1048576,
           "id": "DeepSeek-V4.1-Flash",
+          "contextWindow": 1048576,
           "maxTokens": 16384
         }
       ]
@@ -54,16 +30,43 @@
       "baseUrl": "https://api.xingchiapi.com/v1",
       "models": [
         {
-          "contextWindow": 128000,
           "id": "gpt-6-astra",
+          "contextWindow": 128000,
           "maxTokens": 16384
         },
         {
-          "contextWindow": 128000,
           "id": "gpt-6.1-sol",
+          "contextWindow": 128000,
           "maxTokens": 16384
         }
       ]
+    },
+    "howtofix": {
+      "api": "openai-completions",
+      "apiKey": "$HOWTOFIX_API_KEY",
+      "baseUrl": "https://api.howtofix.id/v1",
+      "models": [
+        {
+          "id": "deepSeek-v4.1-flash-1017-sg",
+          "contextWindow": 128000,
+          "maxTokens": 16384
+        }
+      ]
+    },
+    "100milionseek": {
+      "models": [
+        {
+          "id": "deepseek-v4.1-flash-free",
+          "contextWindow": 197488,
+          "maxTokens": 65536,
+          "reasoning": true,
+          "input": ["text", "image"],
+          "samplingParams": { "reasoning_effort": "max" }
+        }
+      ],
+      "api": "openai-completions",
+      "baseUrl": "https://100milionseek.top/v1",
+      "apiKey": "$HMS_API_KEY"
     }
   }
 }
