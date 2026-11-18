@@ -101,6 +101,7 @@ say "Sandbox bundle"
 BUNDLE="$BRIDGE_DIR/sandbox-bundle"
 mkdir -p "$BUNDLE"
 cp "$REPO_DIR/bridge/pi-gateway.py" "$REPO_DIR/bridge/watcher.py" "$BUNDLE/"
+cp "$REPO_DIR/search/web.py" "$BUNDLE/"
 cp "$REPO_DIR/pi/models.json" "$REPO_DIR/pi/settings.json" "$BUNDLE/"
 cp "$REPO_DIR/setup-sandbox.sh" "$BUNDLE/"
 printf 'PI_GATEWAY_TOKEN=%s\n' "$TOKEN" > "$BUNDLE/gateway.env"
@@ -141,7 +142,7 @@ if [ -n "$HOODY_URL" ]; then
   echo "itself from the public repo on the computer."
 elif [ -n "${ALTARE_TEAM:-}" ] && [ -n "${ALTARE_SERVER:-}" ]; then
   cd "$BRIDGE_DIR"
-  for f in setup-sandbox.sh pi-gateway.py watcher.py models.json settings.json gateway.env provider-keys.env; do
+  for f in setup-sandbox.sh pi-gateway.py watcher.py web.py models.json settings.json gateway.env provider-keys.env; do
     ALTARE_TEAM="$ALTARE_TEAM" ALTARE_SERVER="$ALTARE_SERVER" python3 muse-pi.py put "$BUNDLE/$f" "setup/$f"
   done
   echo "bundle uploaded to /root/work/setup/ on the sandbox"
@@ -149,7 +150,7 @@ else
   echo "ALTARE_TEAM / ALTARE_SERVER not set — upload skipped."
   echo "Upload it yourself with:"
   echo "  cd $BRIDGE_DIR"
-  echo "  for f in setup-sandbox.sh pi-gateway.py watcher.py models.json settings.json gateway.env provider-keys.env; do"
+  echo "  for f in setup-sandbox.sh pi-gateway.py watcher.py web.py models.json settings.json gateway.env provider-keys.env; do"
   echo "    ALTARE_TEAM=<team-id> ALTARE_SERVER=<server-id> python3 muse-pi.py put sandbox-bundle/\$f setup/\$f"
   echo "  done"
   echo "(Find the IDs in the Altare console → server details.)"
