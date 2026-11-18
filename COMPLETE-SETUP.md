@@ -809,3 +809,71 @@ owner's connectors, the box's files, and Muse's memory — never in this repo.
 4. Durable paths only: background jobs and /tmp die on VM replacement.
 5. Verify from OUTSIDE the system you're testing (GitHub API, live site,
    the database) — never from the worker's own report.
+
+## Lesson 21 — A Pi turn can die silently at the provider, and the fix is the retry window (2026-11-19)
+
+**Symptom.** An 18-minute turn (64 tool calls: a 2 m 24 s `pnpm install`
+plus deep research) ended with the session idle and `last_assistant_text`
+EMPTY. No error anywhere the gateway shows you. The work was all done;
+only the final report was missing.
+
+**Wrong first guesses** (all disproven): the prompt was too big / the
+turn "ran out" (the model's own self-diagnosis said exactly this — it
+was wrong); a gateway timeout (the gateway has none for turns — its
+RPC timeouts are per-command, 15–60 s); a context or token limit (no
+`length` stop anywhere in the log).
+
+**Evidence trail — where the truth lives.** The gateway's `/events`
+buffer is in-memory and only holds the latest page; its on-disk events
+file is keyed by the spawn name (`new.events.jsonl` for a first spawn),
+not the session id. The AUTHORITATIVE record is Pi's own session file:
+`~/.pi/agent/sessions/<cwd-slug>/<timestamp>_<session-id>.jsonl` on the
+box (also named by `$PI_SESSION_FILE` inside the session). It records
+every message with its `stopReason`. Readable from outside via the
+Files API — path traversal works (`../.pi/agent/sessions/...` relative
+to the work root). Rule: **when a worker's self-diagnosis and the log
+disagree, the log wins — pull the log before theorising.**
+
+**Root cause.** The provider (100milionseek) returned HTTP 503
+`{"code":"upstream_busy","retry_after_s":20}` four times in ~41 s at
+the very end of the turn. Pi's agent-level retry then had the DEFAULT
+policy: `maxRetries: 3`, `baseDelayMs: 2000`, cap 60 s — a total retry
+window of roughly **14 seconds**. All retries burned inside the busy
+window, the turn ended on an assistant message with
+`stopReason: "error"` and `content: []`, and an empty-content final
+message is indistinguishable from "nothing happened" in the status API.
+
+**The fix (two parts, both verified live 2026-11-19).**
+
+1. **Retry settings** in `~/.pi/agent/settings.json` (schema:
+   `retry.*`, no server-side caps). Two independent layers exist:
+   agent level (`retryAssistantCall`: pure exponential backoff, never
+   reads `retry-after`) and provider level (`retryProviderRequest`:
+   reads `retry-after`/`retry-after-ms` headers, fails fast if the ask
+   exceeds `provider.maxRetryDelayMs`). Note the observed 20 s ask was
+   in the JSON BODY (`retry_after_s`), not a header — so the agent
+   layer is what actually carries recovery. Set:
+   ```json
+   "retry": { "enabled": true, "maxRetries": 12, "baseDelayMs": 15000,
+              "maxAgentDelayMs": 120000,
+              "provider": { "maxRetries": 4, "maxRetryDelayMs": 90000 } }
+   ```
+   Backoff 15→30→60→120→120… = a **19.8-minute** retry window.
+   Settings are read at process construction and there is NO file
+   watcher — a running session keeps the old policy until its process
+   restarts (sessions resume from disk, so a restart is safe).
+2. **No more silent turns:** patch `pi-gateway.py` so `reader_thread`
+   records `last_error` when an assistant `message_end` has
+   `stopReason == "error"` (cleared on `agent_start`), the session
+   entry initialises it to `None`, and `/sessions/{id}/status` returns
+   it. Eight lines. Any future dead turn now states its cause in the
+   status call itself — no diagnostic round-trip.
+
+**Standing protocol that follows from this:** size prompts in steps
+anyway (a shorter turn has less exposure to a provider window), have
+every step write its deliverable to a FILE incrementally (work emitted
+as tool calls survives a dead turn; a report held in the model's head
+does not), and when a turn ends with empty text, send the
+continue-and-explain prompt immediately — do not wait for a human to
+notice. With the retry window at ~20 minutes, a busy spell should now
+be ridden out inside the turn instead of ending it.
