@@ -1,0 +1,9 @@
+# One line: the public Hoody gateway URL (https).
+# It is your computer's terminal URL with `terminal-1` replaced by
+# `http-8765`, e.g.:
+#   https://<project-id>-<computer-id>-http-8765.<server>.computers.hoody.com
+# Written by: ./setup-muse.sh --hoody <url>
+# The URL is public by default — the Bearer token in gateway-token.txt
+# is what guards the gateway. Set proxy permissions on your Hoody
+# project if you want the URL itself locked down.
+https://<project-id>-<computer-id>-http-8765.<server>.computers.hoody.com
