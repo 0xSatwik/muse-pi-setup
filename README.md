@@ -365,8 +365,10 @@ Check: `pi-api.py models` lists all six. Then test each one:
 - **moss dies empty on long sessions** (twice returned empty content
   and died without saving on 80+ message runs). Prefer
   xingchi/gpt-6.1-sol for long, multi-step work.
-- **100milionseek keys can die without warning** (one key 401'd
-  mid-test). If a model starts 401ing, rotate its key.
+- **100milionseek keys can die without warning.** If a model starts
+  401ing, rotate its key — generate a fresh one on the dashboard and
+  set it with `pi-api.py setkey HMS_API_KEY` (key via stdin), then
+  restart the gateway.
 
 ### 4. Install the bridge and the gateway on the box
 
