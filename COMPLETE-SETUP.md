@@ -587,3 +587,222 @@ same change — a stale guide is worse than none.*
   child process (e.g. the curl doing the work), never by `pgrep -f <pattern>`
   — the pattern also matches your own checking shell and reports a false
   "running".
+
+# Part II — Pi as the coding engine (2026-11-19) + every lesson from that night
+
+Purpose: a fresh Muse with this file (plus README.md and SETUP-PROMPT.md)
+can run the whole system in one shot — set up nothing twice, hit no known
+trap twice. IDs, IPs and keys are placeholders; the real values live in the
+owner's connectors, the box's files, and Muse's memory — never in this repo.
+
+## The operating playbook (how production work runs through Pi)
+
+1. **Knowledge pack first, code never first.** Write a BRIEFING.md for the
+   project (mission, current state with exact shas/counts, the queue in
+   order, house rules, hard boundaries) and put it on the box with the
+   project's own source-of-truth files (for AgentX: TODO.md + STATUS.md)
+   at /root/work/<project>/ via `muse-pi.py put`. Prompt 1 to Pi is always:
+   read all of it, report your understanding, VERIFY the state against
+   GitHub yourself, list everything you cannot verify or do not
+   understand. Pi's verification round caught real pack errors (stale
+   "AutoClaw builds" tags, a stale STATUS) before any code existed.
+2. **Answer every question, then provision.** A fresh box has **no git, no
+   pnpm, no docker** — only node + npm + corepack. Pi is root on its own
+   box and provisions itself: `apt-get update && apt-get install -y git`
+   (with DEBIAN_FRONTEND=noninteractive), `corepack enable && corepack
+   prepare pnpm@latest --activate`. Inside a repo, the repo's
+   `packageManager` pin wins over the activated pnpm (rakazo pins
+   pnpm@12.18.0) — that is correct, not a conflict.
+3. **Confirm the write path in a THROWAWAY session before the work session
+   commits anything.** One tiny file, one new test branch, nothing else.
+   Verify the commit sha from outside the box (GitHub API). Only then does
+   the work session get told the mechanism. (Mechanics below.)
+4. **Small prompts, one step each, same session.** Each prompt ends with
+   "report what you changed / ran / resulted, then stop". Muse tests
+   everything Pi ships (CI + independent checks, never Pi's word alone);
+   every bug found goes back into the SAME session as the next prompt.
+   That loop — Pi commits, Muse tests, bugs return as prompts — is the
+   whole method. One session per topic, registered in pi-sessions.json;
+   reuse it, never respawn per task.
+5. **Merges and deploys stay with Muse.** Pi opens PRs and gets CI green.
+   Risky PRs additionally get a DeepSeek (100milionseek) pre-merge review.
+   A PR the owner has put on hold is not merged even when green.
+
+## How Pi reaches GitHub — the vault write path (verified 2026-11-19)
+
+- The vault MCP exposes exactly three GitHub tools:
+  `vault_github_read_file` and `vault_github_list_issues` (read-only) and
+  **`vault_service_request`** — a generic authenticated HTTP proxy. That
+  proxy IS the write path: any method (GET/POST/PUT/PATCH/DELETE), the
+  Worker decrypts the stored credential server-side, the secret never
+  reaches Pi.
+- Parameters: `key_label`, `service`, `path`, optional `method`, `body`.
+  For the owner's GitHub the label is **`gogibeta github`** — it was
+  written down NOWHERE and had to be recovered from a prior session; a
+  model left to guess picks a wrong label and gets `unlock_required`.
+  Record every key label in the project briefing.
+- `service: "github"` maps `path` 1:1 onto the GitHub REST API, so the
+  token's full permission set is reachable (refs, contents, PRs, merges).
+- **Contents-API writes: ALWAYS set `"branch"` in the body.** Omit it and
+  the write lands on the DEFAULT branch (main). This is the single most
+  dangerous default in the whole system.
+- Body cap: **32,768 chars per service_request** (base64 inflates file
+  content ~33%, so ~24 KB raw per file per call). Larger files need the
+  git-data API in pieces or a report back — never silent splitting.
+- Errors are masked: failures come back as `{"error":"upstream_failed"}`
+  with no HTTP status. A 404 and a 403 are indistinguishable — diagnose by
+  READING STATE BACK (does the ref/file exist now?), never from the error.
+- **Vault read_file fails on ~40 KB files** (response-size validation):
+  README.md and AGENTS.md reads were silently swallowed. Workaround for
+  PUBLIC repos: `curl raw.githubusercontent.com/...` — and a public repo
+  clones with no credential at all, which is how Pi got its working copy.
+- Vault admin/unlock calls made from the Muse VM need a **browser
+  User-Agent** (a plain urllib UA gets a Cloudflare 403), and `/unlock`
+  requires a `request_id` (a fresh UUID).
+
+## Gateway mechanics (pi-api.py) worth knowing before you drive it
+
+- `prompt` is ASYNC: it returns a session_id and `disposition: "started"`.
+  Poll `status <id>`; while a turn runs, `last_assistant_text` is `{}`.
+  A finished turn shows `running: false` and the full final text. Long
+  DeepSeek turns (40 KB of reading + max reasoning) legitimately take
+  10–20 minutes — a quiet session is not a dead one.
+- Live progress: `GET /sessions/{id}/events?since=N`.
+- The gateway's `/files` listing can hang on huge directories
+  (node_modules) — fetch individual files with `muse-pi.py getfile`
+  (Files API) instead.
+- Pi packages installed on the box (2026-11-19): context-mode (needs
+  Node ≥ 24.15 — box Node 24 lives in /opt/node24, installed from the
+  .tar.gz dist because the box has no xz; pin exact versions, prerelease
+  dist entries crash naive parsers), pi-mcp-adapter (settings.json
+  `defaultTools` must include `"+codemode"` or the vault's codemode
+  exposure silently changes), pi-hermes-memory (the only memory system),
+  pi-lens (needs `npm install-scripts approve @ast-grep/cli` inside
+  ~/.pi/agent/npm). Full notes: PACKAGES.md.
+
+## Lessons from the PR #84 night (CI, reviews, deployment state)
+
+- When CI logs are unreachable, **check-run annotations** are the only
+  failure detail — and a failure with NO annotations is usually the
+  lint/typecheck job dying outside annotated steps. Reproduce locally
+  with the repo's own per-package `pnpm check` (tsc): Biome does not
+  typecheck, and a bad cast (TS2352) passed every test while failing CI
+  for two rounds.
+- Local `tsc` without `prisma generate` floods **phantom implicit-any
+  errors** across db files (the generated client is missing). Trust only
+  errors in files you actually changed; the rest is fallout.
+- A **closed `vi.mock`** of a shared module breaks with 500s the moment
+  that module gains a new import (the mock returns undefined for the new
+  export). When you add an export to a shared module, grep for closed
+  mocks of it and give them pass-through implementations.
+- A rerun of ONE failed CI job can restart the WHOLE workflow as a new
+  attempt — read `run_attempt` and per-attempt conclusions before
+  declaring anything red or green.
+- **Pipeline state files and watchdogs:** never set the pipeline phase
+  to `watching-ci` before the merge exists. The watchdog keys its
+  rollout off `main_sha` + `merged_at_utc`; a premature watching-ci
+  nearly redeployed the currently-live build (and restarted the sandbox
+  for nothing). Pre-merge steps need their own phase name.
+- **InstaBox `maxRunMinutes` is volatile** — the same run read 120, then
+  240, then 480 minutes, changing mid-run. Never schedule a restart or
+  a warning off a single reading.
+- **Deployment compose files do NOT follow image pulls.** If a PR adds
+  env passthrough lines to the repo compose, the same lines must be
+  hand-inserted into the machine's compose file (timestamped backup
+  first), the stack recreated, and the vars verified INSIDE the
+  containers (print booleans, never values). Values in .env alone never
+  reach the containers — this exact gap killed every MCP sign-in on the
+  live app for a day (origins pointed at the raw sandbox URL instead of
+  the public one). Rule: WEB_ORIGIN / BETTER_AUTH_URL / API_URL always
+  equal the public origin.
+- seek.sh body-via-temp-file and background-jobs-die-on-VM-replacement
+  lessons: see the 2026-11-19 lessons section earlier in this file —
+  they were learned the same night, on this same PR.
+
+## Setup lessons 1–20, condensed (full text: LESSONS-LEARNED.md locally)
+
+1. Skip any setup question the user already answered; say what you assumed.
+2. `setup-muse.sh` prints the gateway token ONCE in its final output —
+   treat all script output as secret; the token lives only in
+   gateway-token.txt (600) and gateway.env.
+3. A bundle with empty model keys still "succeeds" — gate on the
+   empty-keys warning count before uploading, or every model but one
+   fails later and looks broken. Keys live on the box only
+   (/root/pi-bridge/provider-keys.env, 600), never in models.json.
+4. Files-API auth has two routes: an `ALTARE_API_TOKEN` env var, or the
+   `custom.altare-platform` connector (surrogate). The token is created
+   in the Altare console (Team → Settings → API tokens) with scope
+   `servers:files`, and is entered ONLY through Muse's secure
+   connector page — never chat. Team ID and server ID are NOT secrets.
+5. Altare console login is a USER step: Muse opens the page, the user
+   signs in themselves; Muse then works from that browser session.
+6+7. Altare email verification has NO badge anywhere. The only signal is
+   the Getting-Started checklist marking "Verify your email" Done — and
+   that does NOT prove a confirmation mail was sent or clicked (the user
+   never received one). Report exactly that; it blocked nothing.
+8. "Account created" is NOT "sandbox created". On Altare a sandbox IS an
+   app: if Apps is empty and resources read zero, creation did not
+   happen — redo it, don't continue. Verify before every next step.
+9. Prove a new Altare token with `GET /api-tokens/self` first — it
+   returns name, prefix, team and scopes, never the value. The servers
+   list (`GET /tenants/<team>/servers`) is ground truth for existence.
+10. **Discord must be linked before Start works** — an undocumented
+    anti-abuse gate. Link it (Account → Discord) BEFORE creating the
+    sandbox. The console's stopped / "Connecting…" / "unavailable"
+    trio all mean this one gate. The URL UUID is the API server ID;
+    the short Overview ID is not.
+11. Creation path: Apps → Create app → Software → Sandboxes. Region is
+    a pre-selected default, not a real picker; the sandbox takes the
+    whole team free pool (no sliders); team SSH keys must be added
+    BEFORE creation to be selectable; no card prompt on the free tier.
+12. `tailscale up` may not print its approval link inside a short shell
+    window — the pending link is in `tailscale status`. Don't re-run
+    `up` blindly.
+13. **The npm package is `@earendil-works/pi-coding-agent`.** The
+    unscoped `pi` package is a different project with no 1.5.2 — every
+    `npm install -g pi@1.5.2` fails ETARGET forever. Pre-flight any
+    install with `npm view <pkg>@<ver> version`.
+14. After Discord linking the sandbox is still stopped — press Start,
+    expect a node queue ("number 2 in line") on the free tier. And
+    apt-get in setup scripts needs `DEBIAN_FRONTEND=noninteractive`
+    or tzdata stops the run with an interactive timezone prompt.
+15. Monid on the Muse VM: write the connector's SURROGATE into
+    ~/.config/monid/credentials.yaml (600) — never a raw key. With no
+    key, search silently degrades to DuckDuckGo, which returns [].
+16. `web.py research`: wrap the slow FxEmbed X call in try/except. One
+    >60 s X timeout otherwise kills the whole research command even
+    after the web half succeeded — slowness, not an outage.
+17. `setup-sandbox.sh` never installed the search tool on the box: copy
+    web.py to /root/pi-bridge/search.py and create the Monid
+    credentials template (600) by hand, or Pi has NO search at all.
+    DuckDuckGo returns [] from datacenter egress on BOTH sides — the
+    Monid/TinyFish leg is load-bearing; without a Monid key pasted on
+    the box (via the Pi Admin page), in-server search returns nothing.
+18. **Read your own repos before "discovering" their features.** The
+    Cloudflare vault, Monid search and Code Mode were all already
+    built and documented in these repos. Check what's in an account
+    (workers, D1 list) BEFORE creating anything — a duplicate empty
+    D1 in the wrong Cloudflare account was created by skipping this.
+    The user's vault Worker lives in a DIFFERENT Cloudflare account
+    than the connected one; do not redeploy it.
+19. `npx skills add <repo> -g` fails in this environment ("No valid
+    skills found"). Install skills by copying the repo's
+    `skills/<name>/` folder into place. `muse-pi.py put` is TEXT-only —
+    binary payloads ride base64 and are decoded on the box.
+20. Give the gateway a face: the /admin page (opening password = its
+    SHA-256 in gateway.env as PI_ADMIN_PASS_SHA256; 5 failed logins =
+    10-minute lockout) with /secrets, /settings and /monid endpoints
+    replaced every console ritual for keys and models. ALL key/model
+    management goes through that page; the raw gateway token also works
+    as the login. Never paste a key into chat, a prompt, or a browser
+    task — keys enter via the Admin page, Muse's secure pages, or
+    stdin helpers only.
+
+## If you remember only five things
+
+1. Knowledge pack + verification round before any code (playbook step 1).
+2. `"branch"` on every vault contents write — or you just wrote to main.
+3. `@earendil-works/pi-coding-agent` — the unscoped `pi` package is a trap.
+4. Durable paths only: background jobs and /tmp die on VM replacement.
+5. Verify from OUTSIDE the system you're testing (GitHub API, live site,
+   the database) — never from the worker's own report.
