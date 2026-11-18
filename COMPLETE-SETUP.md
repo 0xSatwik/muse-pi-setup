@@ -877,3 +877,63 @@ does not), and when a turn ends with empty text, send the
 continue-and-explain prompt immediately — do not wait for a human to
 notice. With the retry window at ~20 minutes, a busy spell should now
 be ridden out inside the turn instead of ending it.
+
+## Lesson 22 — Long streams die silently, and detached jobs get reaped (2026-11-19)
+
+Two separate failure layers killed the same job (a one-shot DeepSeek
+review of a PR: 126 KB prompt, max reasoning, up to 65 K output tokens)
+five times in one night. Small calls to the same provider answered in
+seconds the whole time — the provider was never "down".
+
+**Layer 1 — the long silent stream.** Each attempt ran ~4–5 minutes and
+then ended with ZERO content. Mechanism: at `reasoning_effort: max` a
+huge prompt sits silent for minutes (queue + prefill + thinking, and
+the gateway does not flush early), and somewhere between client and
+origin an idle/age limit ends the connection before the first content
+token. First-byte latency was 7 s even for a trivial prompt that night.
+Defences, all now in `seek.sh` v2 (committed in this repo):
+- **Cap the output for verdict-style work** (`SEEK_MAX_TOKENS`, e.g.
+  16000): the answer a review needs is a few KB; a 65 K-token ceiling
+  only buys stream lifetime you do not need. Shorter generation =
+  a stream that finishes before anything can kill it.
+- **Truncation is failure.** v1 accepted any non-empty content — a
+  stream cut mid-answer looked like a finished one. v2 requires a
+  `finish_reason` (`stop`/`length`); partial output is saved to
+  `<out>.partial-<n>` and the attempt is retried.
+- **Reasoning is evidence.** A dead attempt's reasoning trace is saved
+  to `<out>.reasoning.partial-<n>`, never discarded.
+- **Diagnosable deaths.** Every attempt logs duration, curl exit code,
+  first-byte time, chunk count, reasoning/content sizes and
+  finish_reason — the next death explains itself from the log alone.
+- Backoff grew up: 6 attempts, 15→30→60→120 s (was 4 × 10/20/30 s).
+
+**Layer 2 — detached jobs get reaped.** The review was relaunched
+three times with `setsid nohup … &` from agent shell sessions. Every
+instance later vanished WITHOUT a final log line — the retry loop
+never got to finish, because the process died with (or shortly after)
+the session that launched it. `nohup`+`setsid` is not durability in
+this environment. Durable runners, in order of preference: a systemd
+service; a runtime-tracked background job; a cron supervisor that
+checks and relaunches (the 30-minute Pi supervisor does exactly this
+for the review now). Rule: **if a job must outlive the turn that
+started it, give it a supervisor, not a prayer** — and verify liveness
+by the real child process (name match, e.g. `ps -C curl`), never by
+`pgrep -f` (it matches your own checking shell) and never by "the log
+hasn't complained".
+
+**Pi side of the same class.** Pi's calls are many and small, so its
+exposure is one response streaming long, plus hung silent requests.
+The Lesson 21 retry window covers the retry side; v2 of the settings
+adds the missing bound on a single silent request:
+`retry.provider.timeoutMs: 300000` — a request with no bytes for
+5 minutes errors out and the agent-level retry takes over, instead of
+hanging a turn indefinitely. The repo's `pi/settings.json` now carries
+the full fixed retry block so a fresh setup starts fixed; remember
+settings are read at process construction — a running session picks
+them up only at its next restart (sessions resume from disk, so that
+restart is safe).
+
+**Verification that counted:** seek.sh v2 probe (small prompt) —
+`dur=7s first_byte=5s finish=stop`; settings re-downloaded from the
+box after writing (values byte-identical); the capped review re-run
+through v2 either completes or its log now states exactly how it died.
