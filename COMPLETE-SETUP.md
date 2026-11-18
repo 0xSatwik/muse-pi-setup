@@ -637,10 +637,13 @@ owner's connectors, the box's files, and Muse's memory — never in this repo.
   Worker decrypts the stored credential server-side, the secret never
   reaches Pi.
 - Parameters: `key_label`, `service`, `path`, optional `method`, `body`.
-  For the owner's GitHub the label is **`gogibeta github`** — it was
-  written down NOWHERE and had to be recovered from a prior session; a
-  model left to guess picks a wrong label and gets `unlock_required`.
-  Record every key label in the project briefing.
+  The label is whatever the vault entry was named when it was stored
+  (typically `<github-username> github`). It is deliberately NOT written
+  in this guide — every setup has its own. Record YOUR label in your
+  private memory and in the project briefing, never in a shared repo:
+  in the run this guide is based on, the label was written down nowhere
+  and had to be recovered from a prior session, and a model left to
+  guess picks a wrong label and gets `unlock_required`.
 - `service: "github"` maps `path` 1:1 onto the GitHub REST API, so the
   token's full permission set is reachable (refs, contents, PRs, merges).
 - **Contents-API writes: ALWAYS set `"branch"` in the body.** Omit it and
