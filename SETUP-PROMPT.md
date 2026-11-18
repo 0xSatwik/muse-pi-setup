@@ -246,6 +246,22 @@ public (no login). Monid signup is a website if you need a key.
    `/mcp` endpoint; `"exposure": "codemode"`), and verify: MCP
    `tools/list` answers, and a call with no grant open returns
    `unlock_required` — that locked answer is the success state.
+7. **Install the four Pi packages** (full detail + problems log in
+   `PACKAGES.md` — read it first): upgrade the box to Node 24
+   (context-mode needs ≥ 24.15; use the `.tar.gz` archive — the box has
+   no `xz` — and pin an exact version instead of parsing the dist index,
+   which contains prereleases), then `pi install npm:context-mode`,
+   `npm:pi-mcp-adapter`, `npm:pi-hermes-memory`, `npm:pi-lens`. After
+   installing: put `"+codemode"` in `defaultTools` in
+   `~/.pi/agent/settings.json` (the adapter needs it for the vault), and
+   run `npm install-scripts approve @ast-grep/cli` in
+   `~/.pi/agent/npm` (pi-lens's binary is blocked until approved).
+   Restart the gateway. **pi-hermes-memory is the only memory system —
+   never install another memory package**, and leave it in its default
+   policy-only mode (no `legacy-inject`). Verify each package the way
+   PACKAGES.md describes (ctx_stats savings, cross-session memory
+   recall, a planted type error for pi-lens, a vault call through the
+   adapter — vault tools need the exact `key_label` you unlocked).
 
 ## 5. Host gotchas — read before touching the host
 
