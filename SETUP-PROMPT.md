@@ -3,35 +3,51 @@
 Copy everything below the line into a chat with your Muse. It will ask
 you the questions in section 1, then set the whole thing up for you
 using the scripts and guide in this repo. You stay in the loop only for
-the steps that need you: the Altare console, and the Tailscale approvals.
+the steps that need you: the host console, and (Altare only) the
+Tailscale approvals.
 
 ---
 
-You are setting up **Muse controlling Pi on an Altare sandbox** for me,
-from the repo `https://github.com/0xSatwik/muse-pi-setup` (public, MIT).
+You are setting up **Muse controlling Pi on a free box** for me, from
+the repo `https://github.com/0xSatwik/muse-pi-setup` (public, MIT).
 Follow the repo's `README.md` as the guide and use its scripts
-(`setup-muse.sh` on my VM, `setup-sandbox.sh` on the sandbox). Do not
-improvise the setup — the repo is the source of truth, and its scripts
-are already tested. If a script step fails, stop, tell me the exact
-error and the fix, and do not work around it silently.
+(`setup-muse.sh` on my VM, `setup-sandbox.sh` on an Altare sandbox,
+`setup-hoody.sh` on a Hoody computer). Do not improvise the setup —
+the repo is the source of truth, and its scripts are already tested.
+If a script step fails, stop, tell me the exact error and the fix, and
+do not work around it silently.
 
 ## 1. Ask me these questions FIRST, before doing anything
 
 Ask them all in one message, then wait for my answers:
 
-1. **Altare:** Do you have an Altare account? (Free tier, no card.) If
-   you have not created the sandbox yet, I cannot create it for you —
-   team API tokens cannot create sandboxes (403
-   `TOKEN_ROUTE_NOT_ALLOWED` by design). Create it in the Altare web
-   console with the full free pool (6 GiB RAM, 150% CPU, 10 GiB disk),
-   any region, and add your SSH public key. Then give me the **team ID**
-   and **server ID** (console → server details).
-2. **Tailscale:** Do you have a Tailscale account? (Free personal
-   plan.) You will need to approve three things later: my VM's device,
-   the sandbox device, and the first connection to the sandbox's
-   tailnet IP. Nothing else is needed from you for Tailscale.
+1. **Host — Altare or Hoody?** Pick one. The Pi side is the same on
+   both; only how I reach it changes.
+   - **Altare sandbox** (6 GB RAM, 1.5 cores, 10 GB disk free; no
+     Docker; the gateway stays on a private Tailscale network). Do you
+     have an Altare account? (Free tier, no card.) If you have not
+     created the sandbox yet, I cannot create it for you — team API
+     tokens cannot create sandboxes (403 `TOKEN_ROUTE_NOT_ALLOWED` by
+     design). Create it in the Altare web console with the full free
+     pool (6 GiB RAM, 150% CPU, 10 GiB disk), any region, and add your
+     SSH public key. Then give me the **team ID** and **server ID**
+     (console → server details).
+   - **Hoody computer** (2 cores, 3 GB RAM, 20 GB disk free; Docker
+     works; the gateway is a public HTTPS URL guarded by the token).
+     Do you have a Hoody account? (Free tier, no card.) Create a
+     computer in the Hoody Hub on the free server (name it e.g.
+     `pi-hoody`, Debian 13, autostart on). Then give me the
+     computer's **terminal URL** from the Hub — I derive the gateway
+     URL from it (replace `terminal-1` with `http-8765`).
+   If you have no preference, recommend Hoody: it is the simpler
+   setup (no Tailscale) and the only one of the two with Docker.
+2. **Tailscale (Altare only):** Do you have a Tailscale account?
+   (Free personal plan.) You will need to approve three things later:
+   my VM's device, the sandbox device, and the first connection to
+   the sandbox's tailnet IP. Nothing else is needed from you for
+   Tailscale. Skip this question if you picked Hoody.
 3. **Models:** Which of these do you want? (Give me the API key for
-   each one you want; keys go to the sandbox only.)
+   each one you want; keys go to the box only.)
    - xingchi gpt-6-astra + gpt-6.1-sol (https://api.xingchiapi.com/v1)
    - tokenlab DeepSeek-V4.1-Flash (https://api.tokenlab.amd.com/v1)
    - moss nex-n2.6 (https://api.mosi.cn/v1)
@@ -47,8 +63,9 @@ Ask them all in one message, then wait for my answers:
    without ever seeing the key? It is a separate repo
    (`0xSatwik/cf-d1-vault`) with its own guide — say yes and I will do
    it after this setup, or no and we skip it.
-6. **Sandbox device name:** What should the sandbox be called on your
-   tailnet? Default is `pi-altare`.
+6. **Sandbox device name (Altare only):** What should the sandbox be
+   called on your tailnet? Default is `pi-altare`. Skip this if you
+   picked Hoody.
 
 Do not start the setup until I have answered. If I skip a question,
 use the default and tell me what you assumed.
@@ -58,10 +75,10 @@ use the default and tell me what you assumed.
 - **Gateway token:** generate one fresh random token
   (`python3 -c "import secrets; print(secrets.token_hex(32))"`).
   Save it to `gateway-token.txt` next to `pi-api.py` (chmod 600) and
-  to `/root/pi-bridge/gateway.env` on the sandbox as
+  to `/root/pi-bridge/gateway.env` on the box as
   `PI_GATEWAY_TOKEN=<token>` (chmod 600). Never print it in chat
   beyond the one time you show it to me, never put it in the repo.
-- **Model keys:** sandbox only — `/root/pi-bridge/provider-keys.env`
+- **Model keys:** box only — `/root/pi-bridge/provider-keys.env`
   (chmod 600, `KEY=value` lines) AND `export KEY='value'` lines in
   `/root/.profile` and `/root/.bashrc`. The gateway reads
   `provider-keys.env` directly; the watcher and interactive Pi read
@@ -70,9 +87,12 @@ use the default and tell me what you assumed.
   repo, never in a Pi prompt, never in a browser task.
 - **Monid key:** `~/.config/monid/credentials.yaml` on my VM
   (chmod 600, format `key: "<value>"` then `label: main`) and
-  `$MONID_API_KEY` on the sandbox.
-- **Tailnet URL:** `tailnet-url.txt` next to `pi-api.py`, one line:
-  `http://<sandbox-tailnet-ip>:8765`.
+  `$MONID_API_KEY` on the box.
+- **Gateway URL:** Altare — `tailnet-url.txt` next to `pi-api.py`,
+  one line: `http://<sandbox-tailnet-ip>:8765`. Hoody —
+  `hoody-url.txt` next to `pi-api.py`, one line: the public
+  `https://<project>-<computer>-http-8765.<server>.computers.hoody.com`
+  URL. `pi-api.py` reads `hoody-url.txt` first when it exists.
 - **Altare IDs:** environment variables `ALTARE_TEAM` and
   `ALTARE_SERVER` only — never in a file that could be shared.
 - **Pi sessions:** one session per topic, reuse by default. Keep the
@@ -82,6 +102,8 @@ use the default and tell me what you assumed.
 ## 3. Browser steps (the only steps that need a browser)
 
 Do these in the browser, in this order. Everything else is scripts.
+
+**If Altare:**
 
 1. **Altare console:** log in, create the sandbox (see question 1),
    open the web console terminal for it. The console sometimes shows
@@ -96,17 +118,28 @@ Do these in the browser, in this order. Everything else is scripts.
       it the same way.
    c. The first request to a new tailnet address needs one more
       approval — approve it once when it appears, then retry.
-3. **Nothing else needs the browser.** Cloning this repo is public
-   (no login). Monid signup is a website if you need a key.
+
+**If Hoody:**
+
+1. **Hoody Hub:** log in, create the computer (see question 1), open
+   its terminal. That is the only browser step — no approvals, no
+   Tailscale. Copy the computer's terminal URL; the gateway URL is
+   the same URL with `terminal-1` replaced by `http-8765`.
+
+**Both hosts:** nothing else needs the browser. Cloning this repo is
+public (no login). Monid signup is a website if you need a key.
 
 ## 4. Steps, in order
 
 1. Clone this repo and run `./setup-muse.sh` on my VM. It installs
    the bridge files, the search tool and skill, generates the gateway
-   token, builds the sandbox bundle, and (if `ALTARE_TEAM` and
-   `ALTARE_SERVER` are set) uploads the bundle to `/root/work/setup/`
-   on the sandbox. If the upload is skipped, it prints the exact
-   upload commands — run them.
+   token, and builds the host bundle. (Altare only: if `ALTARE_TEAM`
+   and `ALTARE_SERVER` are set, it also uploads the bundle to
+   `/root/work/setup/` on the sandbox. Hoody needs no upload —
+   `setup-hoody.sh` fetches the files from the repo itself.)
+
+**If Altare, continue here:**
+
 2. In the Altare web console terminal (as root), run:
    `bash /root/work/setup/setup-sandbox.sh`
    It installs Node 22 + Pi 1.5.2 + Tailscale, places the bundle,
@@ -125,9 +158,37 @@ Do these in the browser, in this order. Everything else is scripts.
    If a check fails, stop and tell me the exact failure and the fix.
    Do not declare the setup done until every check passes.
 
-## 5. Tailscale — the issues we already hit, so you do not hit them
+**If Hoody, continue here instead:**
 
-Read this before touching Tailscale. Every one of these cost real time:
+2. In the Hoody computer's terminal (as root), fetch and run the
+   setup script with the gateway token (from step 1) and your model
+   keys as env vars:
+   `curl -fsSL https://raw.githubusercontent.com/0xSatwik/muse-pi-setup/main/setup-hoody.sh -o /tmp/setup-hoody.sh`
+   `PI_GATEWAY_TOKEN=<token> XINGCHI_API_KEY=<key> ... bash /tmp/setup-hoody.sh`
+   It installs Node 22 + Pi 1.5.2, fetches the bridge files, starts
+   the gateway and watcher in tmux, and prints the gateway token
+   again at the end. (If you left `PI_GATEWAY_TOKEN` unset, it
+   generates one — give it to me so I can save it as
+   `gateway-token.txt`.)
+3. Take the gateway URL it prints (or derive it from the terminal URL
+   as in section 3) and re-run:
+   `./setup-muse.sh --hoody <url>`
+   That writes `hoody-url.txt` and runs the health check.
+4. Verify (all must pass):
+   - `pi-api.py health` → `{"ok": true}`
+   - `pi-api.py models` → all six models (or however many you added)
+   - `pi-api.py prompt "Say OK" --model xingchi/gpt-6.1-sol` → `OK`
+   - `python3 search/web.py research "pi agent"` → web results
+   There is no `muse-pi.py` check on Hoody — Hoody has no Files API,
+   so the gateway URL is the only path.
+   If a check fails, stop and tell me the exact failure and the fix.
+   Do not declare the setup done until every check passes.
+
+## 5. Host gotchas — read before touching the host
+
+### 5A. Tailscale (Altare only)
+
+Every one of these cost real time:
 
 - **No TUN device.** Altare sandboxes have no `/dev/net/` at all, and
   no Docker, no kernel modules, no systemd. The daemon must run in
@@ -169,14 +230,41 @@ Read this before touching Tailscale. Every one of these cost real time:
   to a new tailnet address needs its own approval even after the
   device is approved.
 
+### 5B. Hoody proxy (Hoody only)
+
+- **The URL is the terminal URL with `terminal-1` swapped for
+  `http-8765`.** Full form:
+  `https://<project>-<computer>-http-8765.<server>.computers.hoody.com`.
+  If it does not answer, re-derive it from the terminal URL shown in
+  the Hub — a wrong project, computer or server slug is the usual
+  cause.
+- **The gateway must bind `0.0.0.0`, not its `127.0.0.1` default.**
+  `setup-hoody.sh` starts it with `PI_GATEWAY_HOST=0.0.0.0`. If the
+  localhost health check passes but the public URL does not, this is
+  the first thing to check.
+- **The URL is public by default.** A fresh computer's URLs are open
+  unless the project sets proxy permissions — the Bearer token is the
+  only guard on the gateway. Tell the user this plainly, and offer to
+  set proxy permissions on the project to lock the URL down.
+- **No fallback bridge.** Hoody has no Files API, so if the proxy URL
+  is down there is nothing else to fall back to — check the tmux
+  sessions on the computer (`tmux ls`).
+- **Restart order after a computer restart:** gateway → watcher
+  (tmux sessions `pi-gateway` and `pi-bridge`). Autostart brings the
+  computer back, not the processes. `setup-hoody.sh` prints the two
+  commands at the end.
+- **`pi-api.py` needs no proxy for a Hoody URL.** The `:3130` tunnel
+  proxy applies only to tailnet (`http://100.`) URLs. A Hoody
+  `https://...computers.hoody.com` URL goes direct.
+
 ## 6. Rules while you work
 
 - Report real progress; do not go silent during long steps. If a step
   takes more than a few minutes, say where it is.
 - Verify before trusting: a check counts only when its command
   returns the expected output, not when it looks right.
-- Never paste a key into a Pi prompt or a browser task. Keys go to the
-  sandbox through the bundle/`setkey`/stdin paths only.
+- Never paste a key into a Pi prompt or a browser task. Keys go to
+  the box through the bundle/`setkey`/stdin paths only.
 - Never commit a secret to the repo. The repo's `.gitignore` blocks
   the secret files; keep it that way.
 - Prefer xingchi/gpt-6.1-sol for long Pi work. moss dies empty on long
@@ -185,5 +273,6 @@ Read this before touching Tailscale. Every one of these cost real time:
   start a fresh session for that topic.
 - One Pi session per topic; reuse, compact when long, fresh start only
   if a session dies or gets confused.
-- When you are done, tell me the tailnet IP, the gateway health
-  result, and the model list — and nothing else I did not ask for.
+- When you are done, tell me the gateway URL (Altare: the tailnet IP;
+  Hoody: the `http-8765` URL), the gateway health result, and the
+  model list — and nothing else I did not ask for.
