@@ -133,8 +133,14 @@ def reader_thread(sid):
                 t = rec.get("type", "")
                 if t in ("agent_start",):
                     p["running"] = True
+                    p["last_error"] = None
                 elif t in ("agent_end", "agent_settled"):
                     p["running"] = False
+                elif t == "message_end":
+                    msg = rec.get("message") or {}
+                    if msg.get("stopReason") == "error":
+                        p["last_error"] = {"error": msg.get("errorMessage") or "provider error (no message)",
+                                           "at": msg.get("timestamp")}
     except Exception:
         pass
     p["running"] = False
@@ -152,7 +158,7 @@ def spawn_rpc(sid, cwd, model=None):
     proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, bufsize=1, env=env)
     entry = {"proc": proc, "pending": {}, "events": [], "lock": threading.Lock(),
-             "cwd": cwd, "running": False, "sid": sid}
+             "cwd": cwd, "running": False, "sid": sid, "last_error": None}
     procs[sid or "new"] = entry
     threading.Thread(target=reader_thread, args=(sid or "new",), daemon=True).start()
     return entry
@@ -598,6 +604,7 @@ class H(BaseHTTPRequestHandler):
             entry = procs.get(sid)
             last = rpc_call(entry, {"type": "get_last_assistant_text"}, timeout=30) if entry and entry["proc"].poll() is None else None
             return self._json(200, {"id": sid, "running": bool(entry and entry["running"]),
+                                    "last_error": entry.get("last_error") if entry else None,
                                     "last_assistant_text": (last or {}).get("data") if isinstance(last, dict) else last})
         m = re.match(r"^/sessions/([^/]+)/events$", u.path)
         if m:
