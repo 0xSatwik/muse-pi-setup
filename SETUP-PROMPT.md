@@ -19,7 +19,10 @@ do not work around it silently.
 
 ## 1. Ask me these questions FIRST, before doing anything
 
-Ask them all in one message, then wait for my answers:
+Ask them all in one message, then wait for my answers. **Skip any
+question I have already answered** (for example in the message that
+brought you this prompt) — say what you assumed instead of asking
+again:
 
 1. **Host — Altare or Hoody?** Pick one. The Pi side is the same on
    both; only how I reach it changes.
@@ -28,10 +31,16 @@ Ask them all in one message, then wait for my answers:
      have an Altare account? (Free tier, no card.) If you have not
      created the sandbox yet, I cannot create it for you — team API
      tokens cannot create sandboxes (403 `TOKEN_ROUTE_NOT_ALLOWED` by
-     design). Create it in the Altare web console with the full free
-     pool (6 GiB RAM, 150% CPU, 10 GiB disk), any region, and add your
-     SSH public key. Then give me the **team ID** and **server ID**
-     (console → server details).
+     design). Create it in the Altare web console via **Apps →
+     Create app → Software → Sandboxes** (Ubuntu 24.04, the full free
+     pool — 6 GiB RAM, 150% CPU, 10 GiB disk; add your SSH public key
+     to the team first, under Team → Settings → SSH keys). **Link
+     your Discord account (Account → Discord) before pressing Start —
+     Start refuses until Discord is linked**; after linking, Start
+     may queue ("waiting for room on the node"), which is normal.
+     Then give me the **team ID** and **server ID**
+     (console → server details; the server ID is the UUID in the
+     server URL).
    - **Hoody computer** (2 cores, 3 GB RAM, 20 GB disk free; Docker
      works; the gateway is a public HTTPS URL guarded by the token).
      Do you have a Hoody account? (Free tier, no card.) Create a
@@ -57,12 +66,20 @@ Ask them all in one message, then wait for my answers:
    OpenAI-compatible provider works.
 4. **Search (optional):** Do you have a Monid key for free search?
    Without it, web search still works through the DuckDuckGo fallback
-   but the TinyFish path is off. If you have one, paste it.
+   but the TinyFish path is off. If you have one, paste it. (Know
+   this: the DuckDuckGo fallback returns `[]` from datacenter IPs —
+   verified from both the Muse VM and the sandbox — so without a
+   Monid key, search on the box returns nothing. The Monid leg is
+   the load-bearing one.)
 5. **Secrets vault (optional):** Do you also want the Cloudflare
    Worker + D1 secrets vault so Pi can call GitHub and other APIs
    without ever seeing the key? It is a separate repo
    (`0xSatwik/cf-d1-vault`) with its own guide — say yes and I will do
-   it after this setup, or no and we skip it.
+   it after this setup, or no and we skip it. If yes: **check first
+   whether a vault is already deployed** (you may have made one,
+   possibly in a different Cloudflare account) before creating
+   anything — a duplicate D1 in the wrong account is the known
+   mistake.
 6. **Sandbox device name (Altare only):** What should the sandbox be
    called on your tailnet? Default is `pi-altare`. Skip this if you
    picked Hoody.
@@ -78,6 +95,8 @@ use the default and tell me what you assumed.
   to `/root/pi-bridge/gateway.env` on the box as
   `PI_GATEWAY_TOKEN=<token>` (chmod 600). Never print it in chat
   beyond the one time you show it to me, never put it in the repo.
+  Note: `setup-muse.sh` prints the token once at the end — treat
+  the script's whole output as secret.
 - **Model keys:** box only — `/root/pi-bridge/provider-keys.env`
   (chmod 600, `KEY=value` lines) AND `export KEY='value'` lines in
   `/root/.profile` and `/root/.bashrc`. The gateway reads
@@ -86,8 +105,19 @@ use the default and tell me what you assumed.
   `$VAR` placeholders only), never in a file on my VM, never in the
   repo, never in a Pi prompt, never in a browser task.
 - **Monid key:** `~/.config/monid/credentials.yaml` on my VM
-  (chmod 600, format `key: "<value>"` then `label: main`) and
-  `$MONID_API_KEY` on the box.
+  (chmod 600, format `key: "<value>"` then `label: main`) and the
+  same file on the box (`/root/.config/monid/credentials.yaml`).
+  If Monid is already connected to you as a Muse connector, the
+  connector's surrogate value works in the VM's file (the egress
+  swaps it for the real key on Monid API calls) — the box always
+  needs the real key, pasted on the box or via the Admin page.
+- **After setup, keys and models are managed in the Pi Admin page**
+  (gateway URL + `/admin`; opening password = SHA-256 hash in
+  `gateway.env` as `PI_ADMIN_PASS_SHA256`, or use the gateway token
+  itself). That page is the primary method — provider keys
+  (write-only), live model lists with per-model context/output/
+  reasoning/vision, Make default, Test, the Monid key, gateway
+  restart. Console rituals are the fallback, not the default.
 - **Gateway URL:** Altare — `tailnet-url.txt` next to `pi-api.py`,
   one line: `http://<sandbox-tailnet-ip>:8765`. Hoody —
   `hoody-url.txt` next to `pi-api.py`, one line: the public
@@ -105,15 +135,22 @@ Do these in the browser, in this order. Everything else is scripts.
 
 **If Altare:**
 
-1. **Altare console:** log in, create the sandbox (see question 1),
-   open the web console terminal for it. The console sometimes shows
-   the server as "Offline" when it is alive — trust the terminal, not
-   the badge. Direct SSH from my VM is blocked by its egress proxy,
-   so do not try SSH; use the web console and the Files API.
+1. **Altare console:** log in — **yourself**: Muse opens the page
+   but must never ask for, receive, or type your password/code;
+   once you are signed in, Muse can work in the same session.
+   Link your Discord account (Account → Discord → Link) — only you
+   can, and Start refuses without it. Then create the sandbox (see
+   question 1) and open the web console terminal for it. The console
+   sometimes shows the server as "Offline" when it is alive — trust
+   the terminal, not the badge. Direct SSH from my VM is blocked by
+   its egress proxy, so do not try SSH; use the web console and the
+   Files API.
 2. **Tailscale approvals (three of them, all by the user):**
    a. My VM joins the tailnet as device `muse` and prints an approval
       link — only the user can approve it. The same approval is also
-      at login.tailscale.com/admin/machines.
+      at login.tailscale.com/admin/machines. If `tailscale up`
+      prints no link in the window, run `tailscale status` — the
+      pending approval link is shown there.
    b. The sandbox joins as the device name from question 6 — approve
       it the same way.
    c. The first request to a new tailnet address needs one more
@@ -145,6 +182,9 @@ public (no login). Monid signup is a website if you need a key.
    It installs Node 22 + Pi 1.5.2 + Tailscale, places the bundle,
    starts everything in tmux, and prints the sandbox tailnet IP. When
    it prints a Tailscale login URL, open it and approve the device.
+   (It runs apt noninteractively — no tzdata prompt — and it also
+   installs Pi's search tool at `/root/pi-bridge/search.py` plus a
+   Monid credentials template on the box.)
 3. Take the tailnet IP it printed and re-run:
    `./setup-muse.sh --tailnet <ip>`
    That writes `tailnet-url.txt` and runs the health check.
@@ -169,7 +209,8 @@ public (no login). Monid signup is a website if you need a key.
    the gateway and watcher in tmux, and prints the gateway token
    again at the end. (If you left `PI_GATEWAY_TOKEN` unset, it
    generates one — give it to me so I can save it as
-   `gateway-token.txt`.)
+   `gateway-token.txt`.) It also installs Pi's search tool at
+   `/root/pi-bridge/search.py` plus a Monid credentials template.
 3. Take the gateway URL it prints (or derive it from the terminal URL
    as in section 3) and re-run:
    `./setup-muse.sh --hoody <url>`
@@ -183,6 +224,32 @@ public (no login). Monid signup is a website if you need a key.
    so the gateway URL is the only path.
    If a check fails, stop and tell me the exact failure and the fix.
    Do not declare the setup done until every check passes.
+
+**Both hosts — finish in the Pi Admin page:**
+
+5. Open `<gateway-url>/admin` (Altare tailnet:
+   `http://<sandbox-tailnet-ip>:8765/admin`; the tunnel URL from
+   `/root/pi-bridge/tunnel.log` also works). Set the opening
+   password's SHA-256 in the box's `gateway.env`
+   (`PI_ADMIN_PASS_SHA256`) and restart the gateway, then log in and
+   add any remaining provider keys + the Monid key **there** —
+   write-only, never shown back. Set the default model in the page
+   (or `defaultProvider`/`defaultModel` in `settings.json`; this
+   setup defaults to `100milionseek/deepseek-v4.1-flash-free` with
+   its max profile — contextWindow 197488, maxTokens 65536,
+   reasoning on, vision on, `samplingParams`
+   `{"reasoning_effort": "max"}`).
+6. **If I said yes to the vault (question 5):** wire Pi to it —
+   register agent `pi` with the vault master (only the token's
+   SHA-256 is stored), put Pi's raw request-only token only in
+   `/root/.pi/agent/mcp.json` on the box (chmod 600; the vault's
+   `/mcp` endpoint; `"exposure": "codemode"`), and verify: MCP
+   `tools/list` answers, and a call with no grant open returns
+   `unlock_required` — that locked answer is the success state.
+7. **Jev note:** 100milionseek's `jev-1.13-free` is a classifier
+   (scoring/judging), not a chat model. Pi reaches classifiers
+   through its codemode tool (`models.classify`) — do not add it
+   as a chat model in `models.json`.
 
 ## 5. Host gotchas — read before touching the host
 
@@ -229,6 +296,18 @@ Every one of these cost real time:
 - **Approvals.** Three user approvals (section 3). The first request
   to a new tailnet address needs its own approval even after the
   device is approved.
+- **Discord gate + start queue (host-side, before any of this).**
+  Start refuses until the user links a Discord account, and the
+  console then shows three different confusing statuses that all
+  mean that same gate. After linking, Start may queue ("Waiting
+  for room on the node") — wait it out. And "account created" is
+  not "sandbox created": verify on the Apps page (sandbox listed,
+  resources non-zero) before uploading anything.
+- **Wrong npm package in old script copies.** If a setup script
+  fails with `npm error ETARGET ... pi@1.5.2`, it is an old copy —
+  the real package is `@earendil-works/pi-coding-agent@1.5.2`; the
+  unscoped `pi` is a different project and has no 1.5.2. Re-pull
+  the repo instead of working around it.
 
 ### 5B. Hoody proxy (Hoody only)
 
@@ -265,6 +344,8 @@ Every one of these cost real time:
   returns the expected output, not when it looks right.
 - Never paste a key into a Pi prompt or a browser task. Keys go to
   the box through the bundle/`setkey`/stdin paths only.
+- After setup, keys and models go through the **Pi Admin page**
+  first — not console rituals, and never through chat.
 - Never commit a secret to the repo. The repo's `.gitignore` blocks
   the secret files; keep it that way.
 - Prefer xingchi/gpt-6.1-sol for long Pi work. moss dies empty on long
