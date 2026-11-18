@@ -249,9 +249,12 @@ public (no login). Monid signup is a website if you need a key.
 7. **Jev note:** 100milionseek's `jev-1.13-free` is a classifier
    (scoring/judging), not a chat model. Pi reaches classifiers
    through its codemode tool (`models.classify`). In `models.json`
-   it belongs as a classifier entry (`"api": "typesafe-system-one"`,
-   `baseUrl` = the provider's `/v1/systemone` endpoint — the repo's
-   `pi/models.json` already carries it), never as a chat model, and
+   it belongs as a classifier entry (`"type": "classifier"` —
+   without it Pi catalogues the entry as a chat model and classify
+   refuses it — plus `"api": "typesafe-system-one"`, `baseUrl` =
+   the provider's `/v1/systemone` endpoint, `contextWindow` 32000;
+   the repo's `pi/models.json` already carries it), never as a chat
+   model, and
    `pi/settings.json` enables the tool (`"defaultTools":
    ["+codemode"]`).
 8. **Pi skills:** the setup scripts install `pi-skills/` into
