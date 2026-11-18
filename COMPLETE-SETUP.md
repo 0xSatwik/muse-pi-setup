@@ -569,3 +569,21 @@ correct place for it — but know that it is there.
 *Written 2026-11-18 from a complete live setup. Keep it current: when a
 setup step changes or a new failure is found, update this file in the
 same change — a stale guide is worse than none.*
+
+## Lessons — 2026-11-19 (AgentX PR #84 night)
+
+- **curl `-d` with a big body in argv breaks at ~128 KB.** Linux caps a single
+  argument (MAX_ARG_STRLEN); a 126 KB JSON body passed as `-d "$body"` fails
+  every attempt with `[Errno 7] Argument list too long`, and a retry loop just
+  fails identically four times. Fix: write the body to a temp file and send
+  `-d @file`. (Found in seek.sh, the 100milionseek DeepSeek consult wrapper;
+  fixed and smoke-verified the same night.)
+- **Background jobs and /tmp do not survive a VM/sandbox replacement.** A long
+  review job launched with nohup died silently when the VM was replaced; its
+  prompt and log lived in /tmp and vanished with it, so the run looked
+  "still going" for hours. Rules: keep prompts, logs and state files in
+  persistent workspace paths, never /tmp; if the output file AND the log are
+  both missing, the job is dead, not running; verify liveness by the real
+  child process (e.g. the curl doing the work), never by `pgrep -f <pattern>`
+  — the pattern also matches your own checking shell and reports a false
+  "running".
