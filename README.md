@@ -338,12 +338,7 @@ Per-model settings (the values in `pi/settings.json`):
   characters; every request is charged ~630 prompt tokens even for
   a tiny prompt (a hidden wrapper system prompt); streaming is
   effectively mandatory for big calls (non-streaming can die on a
-  gateway 524); at most 5 parallel requests per account. The same
-  account also exposes `jev-1.13-free` — a **classifier/judge**
-  (System One endpoint), *not* a chat model: Pi reaches classifiers
-  through its codemode tool (`models.classify`), never as a
-  conversation model, so it is deliberately not in `models.json`
-  as a chat entry.
+  gateway 524); at most 5 parallel requests per account.
 - All other models: `contextWindow` 128,000, `maxTokens` 16,384
   (documented values where verifiable, kept as-is otherwise).
 - Compaction is on (`reserveTokens` 16384, `keepRecentTokens` 20000),
@@ -741,39 +736,6 @@ howtofix was down, Xingchi unscored by the harnesses.
   backup of `provider-keys.env` on the sandbox first, and restart the
   gateway afterwards.
 
-## Pi skills — what Pi itself knows
-
-Two skills ship in `pi-skills/` and are installed on the box into
-`/root/.pi/agent/skills/` by the setup scripts (alongside Hallmark, the
-default design skill). They contain **no secrets** — they teach Pi the
-system it lives in:
-
-- **`pi-system`** — Pi's always-read operating manual ("READ FIRST in
-  every session"). It covers: the models it has and the DeepSeek max
-  profile; where its provider keys live (`provider-keys.env`, root-only;
-  `models.json` holds `$ENV` placeholders only) and that keys are managed
-  by the user in the Pi Admin page — whose opening password Pi never
-  sees; the combined search (`/root/pi-bridge/search.py`, Monid free
-  endpoints + DuckDuckGo) as the only search route; the secrets vault —
-  Pi's token is request-only, calls need a 2-hour grant for one exact
-  service + label, a locked call returns `unlock_required` and Pi must
-  ask Muse to unlock rather than hunt for a key, and no tool can ever
-  return a key value; Hallmark for design; and the honesty rules (report
-  failures plainly, never fabricate results).
-- **`jev-scoring`** — how and when to use the Jev classifier
-  (`jev-1.13-free`): scoring, judging, classifying, ranking, approval
-  detection and quality gates go through the codemode tool
-  (`models.getModelOfType("classifier", "100milionseek", "jev-1.13-free")`
-  + `models.classify` with typed bool/choice/score questions), never
-  through chat and never by inventing a score. Retry 502/503s with
-  backoff; if the judge stays down, say so.
-
-For classifiers to be reachable at all, `pi/settings.json` enables the
-codemode tool (`"defaultTools": ["+codemode"]`) and `pi/models.json`
-carries the Jev entry as a `typesafe-system-one` model pointed at the
-provider's `/v1/systemone` endpoint — a classifier entry, not a chat
-model, so it never appears in the model picker.
-
 ## Repository layout
 
 ```text
@@ -804,9 +766,6 @@ search/
   SEARCH.md          search system notes
 skills/
   web-research/SKILL.md   the research skill (Muse + Pi)
-pi-skills/
-  pi-system/SKILL.md      Pi's always-read operating manual (no secrets)
-  jev-scoring/SKILL.md    how Pi uses the Jev classifier for scoring
 docs/
   pi-per-model-settings-applied.md
   atria-recheck-20261117.md
