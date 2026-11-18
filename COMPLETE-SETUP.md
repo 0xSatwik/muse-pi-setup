@@ -892,8 +892,10 @@ the gateway does not flush early), and somewhere between client and
 origin an idle/age limit ends the connection before the first content
 token. First-byte latency was 7 s even for a trivial prompt that night.
 Defences, all now in `seek.sh` v2 (committed in this repo):
-- **Cap the output for verdict-style work** (`SEEK_MAX_TOKENS`, e.g.
-  16000): the answer a review needs is a few KB; a 65 K-token ceiling
+- **Cap the output for verdict-style work** (`SEEK_MAX_TOKENS`; the owner
+  set 32000 for PR reviews — a max-reasoning review of a full diff
+  measurably completes at ~25–30 K tokens, so 16000 could cut the
+  verdict itself): the answer a review needs is a few KB; a 65 K-token ceiling
   only buys stream lifetime you do not need. Shorter generation =
   a stream that finishes before anything can kill it.
 - **Truncation is failure.** v1 accepted any non-empty content — a
