@@ -3,6 +3,7 @@ gateway-token.txt
 provider-keys.env
 tailnet-url.txt
 public-url.txt
+hoody-url.txt
 *.env
 *token*.txt
 *secret*.txt
