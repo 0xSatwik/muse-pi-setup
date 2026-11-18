@@ -202,7 +202,11 @@ def combined_search(query, purpose=None):
 def research(query, pages=2, fetch_top=5):
     """Maximum data: web search (both engines) + X search, then fetch top URLs."""
     combo = combined_search(query)
-    x = x_search(query, pages=pages)
+    try:
+        x = x_search(query, pages=pages)
+    except Exception as e:
+        print(f"[research] X search failed ({e}); continuing with web only", file=sys.stderr)
+        x = None
     fetched = []
     top = [r["url"] for r in combo["web"][:fetch_top] if r["url"].startswith("http")]
     if top:
