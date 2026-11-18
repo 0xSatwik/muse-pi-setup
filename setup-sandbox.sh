@@ -102,18 +102,6 @@ if [ ! -f /root/.config/monid/credentials.yaml ]; then
   echo "Monid credentials template created — paste the real key into /root/.config/monid/credentials.yaml"
 fi
 
-say "Pi skills (pi-system + jev-scoring)"
-# Pi's own skills: pi-system is its always-read operating manual,
-# jev-scoring teaches it the Jev classifier. The bundle carries them
-# under pi-skills/ (repo root pi-skills/).
-if [ -d "$BUNDLE/pi-skills" ]; then
-  mkdir -p /root/.pi/agent/skills
-  cp -r "$BUNDLE/pi-skills/." /root/.pi/agent/skills/
-  echo "pi-skills installed: $(ls /root/.pi/agent/skills | tr '\n' ' ')"
-else
-  echo "WARNING: bundle has no pi-skills — Pi lacks its system/Jev skills (rebuild the bundle with setup-muse.sh)"
-fi
-
 say "Starting tailscaled (tmux session 'tailscaled')"
 tmux kill-session -t tailscaled 2>/dev/null || true
 tmux new-session -d -s tailscaled \
