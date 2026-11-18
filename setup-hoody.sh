@@ -88,13 +88,6 @@ curl -fsSL "$REPO_RAW/search/web.py" -o /tmp/search.py \
 [ -f /root/pi-bridge/search.py ] && cp /root/pi-bridge/search.py /root/pi-bridge/search.py.bak
 cp /tmp/search.py /root/pi-bridge/search.py
 chmod +x /root/pi-bridge/search.py
-# Pi's own skills (repo pi-skills/): pi-system = always-read operating
-# manual, jev-scoring = the Jev classifier skill.
-for sk in pi-system jev-scoring; do
-  mkdir -p "/root/.pi/agent/skills/$sk"
-  curl -fsSL "$REPO_RAW/pi-skills/$sk/SKILL.md" -o "/root/.pi/agent/skills/$sk/SKILL.md" \
-    || fail "could not fetch pi-skills/$sk/SKILL.md from $REPO_RAW"
-done
 echo "files fetched"
 
 say "Combined search on the box (Pi side)"
