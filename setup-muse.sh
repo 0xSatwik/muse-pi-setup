@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 # setup-muse.sh — Muse-side setup for muse-pi-setup (run on the Muse VM).
 # Does everything scriptable on this side, then prints the exact manual
-# steps that remain (Altare console, Tailscale approvals, sandbox script).
+# steps that remain (host console, Tailscale approvals for Altare only,
+# host setup script).
 #
 # Usage:
-#   ./setup-muse.sh [--repo-dir DIR] [--tailnet IP]
+#   ./setup-muse.sh [--repo-dir DIR] [--tailnet IP | --hoody URL]
 #   --repo-dir DIR   where to clone/copy this repo (default: ~/workspace/muse-pi-setup)
-#   --tailnet IP     sandbox tailnet IP, e.g. 100.x.x.x — finishes the setup
-#                    (writes tailnet-url.txt and runs the health check).
-#                    Omit it on the first run; re-run with it after the
-#                    sandbox reports its tailnet IP.
+#   --tailnet IP     Altare sandbox tailnet IP, e.g. 100.x.x.x — finishes
+#                    the Altare setup (writes tailnet-url.txt and runs the
+#                    health check). Omit it on the first run; re-run with
+#                    it after the sandbox reports its tailnet IP.
+#   --hoody URL      Hoody computer gateway URL, e.g.
+#                    https://<project>-<computer>-http-8765.<server>.computers.hoody.com
+#                    — finishes the Hoody setup (writes hoody-url.txt and
+#                    runs the health check). Omit it on the first run;
+#                    re-run with it after setup-hoody.sh prints it.
+#                    --tailnet and --hoody are alternatives, not both.
 #
 # Optional env vars (keys are never printed except the gateway token, once):
 #   ALTARE_TEAM, ALTARE_SERVER   Altare team + sandbox server IDs (enables
@@ -26,13 +33,18 @@ set -euo pipefail
 REPO_DIR="${REPO_DIR:-$HOME/workspace/muse-pi-setup}"
 BRIDGE_DIR="$HOME/workspace/altare-pi-setup/pi-bridge"
 TAILNET_IP=""
+HOODY_URL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo-dir) REPO_DIR="$2"; shift 2;;
     --tailnet) TAILNET_IP="$2"; shift 2;;
+    --hoody) HOODY_URL="$2"; shift 2;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done
+if [ -n "$TAILNET_IP" ] && [ -n "$HOODY_URL" ]; then
+  echo "--tailnet and --hoody are alternatives — pass only one" >&2; exit 2
+fi
 
 say() { printf '\n==> %s\n' "$*"; }
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing tool: $1" >&2; exit 1; }; }
@@ -57,6 +69,7 @@ for f in pi-api.py muse-pi.py pi-gateway.py watcher.py README.md; do
 done
 cp "$REPO_DIR/bridge/tailnet-url.txt.example" "$BRIDGE_DIR/tailnet-url.txt.example"
 cp "$REPO_DIR/bridge/public-url.txt.example" "$BRIDGE_DIR/public-url.txt.example"
+cp "$REPO_DIR/bridge/hoody-url.txt.example" "$BRIDGE_DIR/hoody-url.txt.example"
 echo "bridge files installed"
 
 say "Installing search + skill"
@@ -122,8 +135,11 @@ else
   echo "Get a free key at monid, then save it to ~/.config/monid/credentials.yaml (chmod 600)."
 fi
 
-say "Uploading the bundle to the sandbox"
-if [ -n "${ALTARE_TEAM:-}" ] && [ -n "${ALTARE_SERVER:-}" ]; then
+say "Uploading the bundle to the sandbox (Altare only)"
+if [ -n "$HOODY_URL" ]; then
+  echo "Hoody host — no upload. setup-hoody.sh fetches the bridge files"
+  echo "itself from the public repo on the computer."
+elif [ -n "${ALTARE_TEAM:-}" ] && [ -n "${ALTARE_SERVER:-}" ]; then
   cd "$BRIDGE_DIR"
   for f in setup-sandbox.sh pi-gateway.py watcher.py models.json settings.json gateway.env provider-keys.env; do
     ALTARE_TEAM="$ALTARE_TEAM" ALTARE_SERVER="$ALTARE_SERVER" python3 muse-pi.py put "$BUNDLE/$f" "setup/$f"
@@ -139,7 +155,16 @@ else
   echo "(Find the IDs in the Altare console → server details.)"
 fi
 
-if [ -n "$TAILNET_IP" ]; then
+if [ -n "$HOODY_URL" ]; then
+  say "Finishing with Hoody URL $HOODY_URL"
+  printf '%s\n' "$HOODY_URL" > "$BRIDGE_DIR/hoody-url.txt"
+  cd "$BRIDGE_DIR"
+  python3 pi-api.py health
+  python3 pi-api.py models | head -20
+  echo
+  echo "If health is ok and the models list, the setup is DONE."
+  echo "Try: python3 pi-api.py prompt \"Say OK\" --model xingchi/gpt-6.1-sol"
+elif [ -n "$TAILNET_IP" ]; then
   say "Finishing with tailnet IP $TAILNET_IP"
   printf 'http://%s:8765\n' "$TAILNET_IP" > "$BRIDGE_DIR/tailnet-url.txt"
   cd "$BRIDGE_DIR"
@@ -149,8 +174,9 @@ if [ -n "$TAILNET_IP" ]; then
   echo "If health is ok and the models list, the setup is DONE."
   echo "Try: python3 pi-api.py prompt \"Say OK\" --model xingchi/gpt-6.1-sol"
 else
-  say "Manual steps that remain (do these, then re-run with --tailnet)"
+  say "Manual steps that remain (pick your host, then re-run with --tailnet or --hoody)"
   cat <<'EOF'
+ALTARE host:
 1. Altare console (browser): create the sandbox if you have not yet
    (team token cannot create one — use the console). Note the team ID
    and server ID, and set ALTARE_TEAM / ALTARE_SERVER.
@@ -167,6 +193,21 @@ else
    That writes tailnet-url.txt and runs the health check.
 5. First request to a new tailnet address needs one approval from you
    (Muse will show it). Approve it once, then re-run the health check.
+
+HOODY host:
+1. Hoody Hub (browser): create a computer on the free server (name it
+   e.g. pi-hoody, Debian 13, autostart on). Open its terminal.
+2. In the computer's terminal (as root), fetch and run the setup script
+   with the gateway token (printed at the end of this run) and your
+   model keys as env vars:
+     curl -fsSL https://raw.githubusercontent.com/0xSatwik/muse-pi-setup/main/setup-hoody.sh -o /tmp/setup-hoody.sh
+     PI_GATEWAY_TOKEN=<token> XINGCHI_API_KEY=<key> ... bash /tmp/setup-hoody.sh
+   It installs Node + Pi, fetches the bridge files, starts the gateway
+   and watcher in tmux, and prints the gateway token again at the end.
+3. Take the gateway URL it prints (or derive it: your terminal URL
+   with `terminal-1` replaced by `http-8765`) and re-run:
+     ./setup-muse.sh --hoody <url>
+   That writes hoody-url.txt and runs the health check.
 EOF
 fi
 
