@@ -1,14 +1,23 @@
-# Muse → Pi bridge (Altare sandbox "pi")
+# Muse → Pi bridge (Altare sandbox "pi" or Hoody computer)
 
 ## Standing delegation rule (2026-11-17)
-Frequently delegate to Pi on Altare — token saving (Pi uses the user's
-custom APIs, not Muse tokens), extra intelligence (second model /
-second opinion), and better architecture (Pi double-checks designs).
+Frequently delegate to Pi — token saving (Pi uses the user's custom
+APIs, not Muse tokens), extra intelligence (second model / second
+opinion), and better architecture (Pi double-checks designs).
 Long-running, heavy, and architecture work goes to Pi by default.
 Full policy: `~/workspace/altare-pi-setup/DELEGATION.md`.
 
-Direct SSH from Muse's VM is blocked by its egress proxy, so Muse
-doesn't SSH into the sandbox. Instead:
+## Hosts
+- **Altare sandbox:** Muse reaches Pi two ways — the gateway over
+  Tailscale (primary) and this file-queue bridge over the Altare Files
+  API (fallback). Direct SSH from Muse's VM is blocked by its egress
+  proxy, so Muse doesn't SSH into the sandbox.
+- **Hoody computer:** Muse reaches Pi only through the gateway, over
+  its public `https` `http-8765` URL. There is no Files API and no
+  fallback bridge — this `muse-pi.py` does not apply there. The
+  gateway must bind `0.0.0.0` on Hoody (`PI_GATEWAY_HOST=0.0.0.0`).
+
+On Altare:
 
 ```
 Muse --Files API--> /root/pi-bridge/inbox/<id>.json
