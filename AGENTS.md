@@ -15,8 +15,14 @@ Add an entry whenever you work something out worth keeping, for example:
 It starts empty and is meant to grow slowly. Don't pad it; a short, accurate file beats a long, stale one.
 
 ## Altare Pi delegation (standing rule, 2026-11-17)
-- Frequently delegate long-running / heavy / architecture work to Pi on the Altare sandbox "pi" via `~/workspace/altare-pi-setup/pi-bridge/muse-pi.py` (ask / send+get). Reasons: token saving (Pi uses the user's custom APIs), extra intelligence (second model/opinion), better architecture (Pi double-checks designs).
-- Models: xingchi/gpt-6-astra, xingchi/gpt-6.1-sol, tokenlab/DeepSeek-V4.1-Flash, moss/nex-n2.6, howtofix/deepSeek-v4.1-flash-1017-sg, 100milionseek/deepseek-v4.1-flash-free. Watcher runs in tmux `pi-bridge` on the sandbox; restart it after a sandbox restart.
+- Frequently delegate long-running / heavy / architecture work to Pi
+  via `~/workspace/altare-pi-setup/pi-bridge/muse-pi.py` (ask / send+get)
+  on Altare, or via `pi-api.py` over the Hoody `http-8765` URL on a
+  Hoody computer. Reasons: token saving (Pi uses the user's custom APIs),
+  extra intelligence (second model/opinion), better architecture (Pi
+  double-checks designs). The Pi side (paths, models, sessions) is the
+  same on both hosts; only how Muse reaches it changes.
+- Models: xingchi/gpt-6-astra, xingchi/gpt-6.1-sol, tokenlab/DeepSeek-V4.1-Flash, moss/nex-n2.6, howtofix/deepSeek-v4.1-flash-1017-sg, 100milionseek/deepseek-v4.1-flash-free. Watcher runs in tmux `pi-bridge` on the box; restart it after a box restart.
 - Sessions (standing rule, user choice 2026-11-17): ONE Pi session per topic, reuse by default — never a fresh session when a topic already has one. Registry: `~/workspace/altare-pi-setup/pi-bridge/pi-sessions.json`. Continue with `pi-api.py prompt --session <id>`; register new topics there. Compact when long; fresh start only if a session dies or gets confused. Prefer xingchi/gpt-6.1-sol for long sessions.
 
 ## Web research (standing rule, 2026-11-17)
