@@ -12,6 +12,10 @@ BUNDLE=/root/work/setup
 HOSTNAME="${PI_HOSTNAME:-pi-altare}"
 SOCK=/root/tailscale/tailscaled.sock
 
+# tzdata (and friends) must never stop the run with an interactive
+# question in the web console — apt runs noninteractively throughout.
+export DEBIAN_FRONTEND=noninteractive
+
 say() { printf '\n==> %s\n' "$*"; }
 fail() { echo "FAILED: $*" >&2; exit 1; }
 
@@ -36,7 +40,7 @@ echo "node $(node --version) ok"
 
 say "Pi 1.5.2"
 if ! pi --version 2>/dev/null | grep -q '1.5.2'; then
-  npm install -g pi@1.5.2 || fail "pi install failed"
+  npm install -g @earendil-works/pi-coding-agent@1.5.2 || fail "pi install failed"
 fi
 pi --version | grep -q '1.5.2' || fail "pi 1.5.2 not installed (got: $(pi --version 2>/dev/null))"
 echo "pi $(pi --version) ok"
@@ -78,6 +82,25 @@ while IFS='=' read -r k v || [ -n "$k" ]; do
   grep -q "^export $k=" /root/.bashrc 2>/dev/null || echo "export $k='$v'" >> /root/.bashrc
 done < /root/pi-bridge/provider-keys.env
 echo "files placed"
+
+say "Combined search on the box (Pi side)"
+# Pi's copy of the combined search tool (search/web.py in the repo).
+# The bundle carries it as web.py; without this copy Pi has no search.
+if [ -f "$BUNDLE/web.py" ]; then
+  cp "$BUNDLE/web.py" /root/pi-bridge/search.py
+  chmod +x /root/pi-bridge/search.py
+  echo "search.py installed"
+else
+  echo "WARNING: bundle has no web.py — Pi search not installed (rebuild the bundle with setup-muse.sh)"
+fi
+# Monid credentials template — the real key is pasted on the box later
+# (or via the Pi Admin page's Monid card, which writes this same file).
+mkdir -p /root/.config/monid
+if [ ! -f /root/.config/monid/credentials.yaml ]; then
+  printf 'key: "PASTE_MONID_KEY_HERE"\nlabel: main\n' > /root/.config/monid/credentials.yaml
+  chmod 600 /root/.config/monid/credentials.yaml
+  echo "Monid credentials template created — paste the real key into /root/.config/monid/credentials.yaml"
+fi
 
 say "Starting tailscaled (tmux session 'tailscaled')"
 tmux kill-session -t tailscaled 2>/dev/null || true
