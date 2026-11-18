@@ -33,6 +33,10 @@ set -euo pipefail
 REPO_REF="${REPO_REF:-main}"
 REPO_RAW="https://raw.githubusercontent.com/0xSatwik/muse-pi-setup/$REPO_REF"
 
+# tzdata (and friends) must never stop the run with an interactive
+# question — apt runs noninteractively throughout.
+export DEBIAN_FRONTEND=noninteractive
+
 say() { printf '\n==> %s\n' "$*"; }
 fail() { echo "FAILED: $*" >&2; exit 1; }
 
@@ -57,7 +61,7 @@ echo "node $(node --version) ok"
 
 say "Pi 1.5.2"
 if ! pi --version 2>/dev/null | grep -q '1.5.2'; then
-  npm install -g pi@1.5.2 || fail "pi install failed"
+  npm install -g @earendil-works/pi-coding-agent@1.5.2 || fail "pi install failed"
 fi
 pi --version | grep -q '1.5.2' || fail "pi 1.5.2 not installed (got: $(pi --version 2>/dev/null))"
 echo "pi $(pi --version) ok"
@@ -78,7 +82,23 @@ for f in models.json settings.json; do
   [ -f "/root/.pi/agent/$f" ] && cp "/root/.pi/agent/$f" "/root/.pi/agent/$f.bak"
   cp "/tmp/$f" "/root/.pi/agent/$f"
 done
+# Pi's copy of the combined search tool (search/web.py in the repo).
+curl -fsSL "$REPO_RAW/search/web.py" -o /tmp/search.py \
+  || fail "could not fetch search/web.py from $REPO_RAW"
+[ -f /root/pi-bridge/search.py ] && cp /root/pi-bridge/search.py /root/pi-bridge/search.py.bak
+cp /tmp/search.py /root/pi-bridge/search.py
+chmod +x /root/pi-bridge/search.py
 echo "files fetched"
+
+say "Combined search on the box (Pi side)"
+# Monid credentials template — the real key is pasted on the box later
+# (or via the Pi Admin page's Monid card, which writes this same file).
+mkdir -p /root/.config/monid
+if [ ! -f /root/.config/monid/credentials.yaml ]; then
+  printf 'key: "PASTE_MONID_KEY_HERE"\nlabel: main\n' > /root/.config/monid/credentials.yaml
+  chmod 600 /root/.config/monid/credentials.yaml
+  echo "Monid credentials template created — paste the real key into /root/.config/monid/credentials.yaml"
+fi
 
 say "Gateway token + model keys"
 if [ -n "${PI_GATEWAY_TOKEN:-}" ]; then
