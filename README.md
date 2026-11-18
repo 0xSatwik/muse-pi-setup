@@ -46,6 +46,58 @@ the scripts.
   verified command-by-command, not yet run end to end on a real Hoody
   computer; it is idempotent, so re-running it is safe.
 
+**The full detailed run** — every step, bug, fix and feature from the
+2026-11-18 live setup (Altare), written so a fresh Muse account can
+reproduce the whole system in one go — is in
+[`COMPLETE-SETUP.md`](COMPLETE-SETUP.md). This README is the map;
+that file is the territory.
+
+## After setup: keys and models live in the Pi Admin page
+
+The gateway serves a small admin page at **`<gateway-url>/admin`** —
+this is THE way to manage keys and models after setup, not console
+rituals:
+
+- **Altare (tailnet):** `http://<sandbox-tailnet-ip>:8765/admin`
+- **Altare (fallback):** the cloudflared quick-tunnel URL from
+  `/root/pi-bridge/tunnel.log` on the box, + `/admin`. The URL rotates
+  whenever the tunnel restarts — always read the current one there.
+- **Hoody:** your `http-8765` gateway URL + `/admin`.
+
+**Login:** an opening password whose **SHA-256 hash** lives in the
+box's `gateway.env` as `PI_ADMIN_PASS_SHA256` (set it there, restart
+the gateway). The page exchanges it for the gateway token via
+`POST /admin-login`; the raw gateway token also works in the same
+box. Five failed logins lock the page for 10 minutes. Whoever holds
+the password or token can also prompt Pi, and Pi runs as root in the
+sandbox — treat both like a root password.
+
+From the page you can: set/remove provider keys (**write-only** — the
+API lists names and set/not-set booleans and can never read a key
+back), load a provider's **live model list** and add models with
+per-model context/output limits and reasoning/vision toggles, edit
+models, **make one the default**, test a model ("Say OK"), paste the
+**Monid key** (writes the box's Monid credentials file), and restart
+the gateway. The default model itself is `defaultProvider` +
+`defaultModel` in Pi's `settings.json`; this setup defaults to
+`100milionseek/deepseek-v4.1-flash-free` with its max profile
+(`contextWindow` 197488 — the enforced hard cap, whatever the
+provider advertises — `maxTokens` 65536, `reasoning: true`,
+`input: ["text","image"]`, `samplingParams:
+{"reasoning_effort": "max"}`; see step 3).
+
+**Vault, in one paragraph** (full guide in the
+[cf-d1-vault](https://github.com/0xSatwik/cf-d1-vault) repo): check
+whether a vault is *already deployed* before creating anything. The
+admin registers agent `pi` (only the token's SHA-256 is stored);
+Pi's raw request-only token lives solely in
+`/root/.pi/agent/mcp.json` on the box (chmod 600), pointing at the
+vault's `/mcp` endpoint with `"exposure": "codemode"`. Pi's calls
+stay locked — the answer is `unlock_required` — until the admin
+unlocks one exact service + one exact key label for 2 hours; even
+then the Worker uses the key server-side and Pi only ever sees the
+API response, never the key.
+
 ## Choose your host — Altare or Hoody?
 
 One server, free tier, head to head (checked 2026-11-18):
@@ -148,13 +200,30 @@ Team API tokens **cannot** create a sandbox (the API returns 403
 `TOKEN_ROUTE_NOT_ALLOWED` by design). Create it in the Altare web
 console while logged in:
 
-1. Create a server in your team, region of your choice, using the full
-   free pool (6 GiB RAM, 150% CPU, 10 GiB disk).
-2. Add your SSH public key at creation. Note the server ID, the SSH
+1. **Link your Discord account first** (Account → Discord → Link).
+   An unlinked account cannot start apps: Start refuses with "Link
+   Discord to start your app". Only the account owner can do this
+   step. After linking, Start may still queue ("Waiting for room on
+   the node") — that is normal on the free node, not a failure.
+2. Add your SSH public key to the **team** first (Team → Settings →
+   SSH keys) — keys are picked from the team list at creation.
+3. Create the sandbox via **Apps → Create app → Software →
+   Sandboxes**: Ubuntu 24.04, any region (one comes pre-selected),
+   the whole free pool (6 GiB RAM, 150% CPU, 10 GiB disk — resources
+   are not sliders; the sandbox takes the team's pool). No payment
+   prompt appears on the free tier.
+4. Note the server ID (the UUID in the server URL — that is the one
+   APIs use; the short ID on the Overview page is not), the SSH
    host/port, and your team ID.
-3. The console sometimes shows the server as "Offline" when it is
+5. **Verify before continuing:** the Apps page must list the sandbox
+   with non-zero resources. "Account created" is not "sandbox
+   created" — if Apps is empty, creation did not happen; redo it,
+   do not continue to the bundle upload.
+6. The console sometimes shows the server as "Offline" when it is
    actually alive — check by opening the web console terminal instead
-   of trusting the status badge.
+   of trusting the status badge. (Email verification has no badge
+   anywhere; the "Getting started" checklist marking it Done is the
+   only signal, and it did not block anything in the live run.)
 
 Altare sandboxes share the host kernel: **no Docker, no kernel
 modules, no TUN device, no systemd**. Long-running processes go in
@@ -194,10 +263,14 @@ form, for reference:
 ```bash
 # Node 22 (Pi needs Node 22.19+)
 # Install node via your preferred method, then:
-npm install -g pi@1.5.2
+npm install -g @earendil-works/pi-coding-agent@1.5.2
 pi --version   # expect 1.5.2
 node --version # expect v22.x
 ```
+
+(The package is the scoped `@earendil-works/pi-coding-agent`. The
+unscoped `pi` is a different project entirely — `npm install -g
+pi@1.5.2` fails with ETARGET and can never work.)
 
 Pi installs to `/root/.pi/agent/bin/pi`; make sure it is on PATH
 (add it to `/root/.profile`).
@@ -223,13 +296,6 @@ The six models this setup was built with (all OpenAI-compatible):
 | howtofix | deepSeek-v4.1-flash-1017-sg | https://api.howtofix.id/v1 | `HOWTOFIX_API_KEY` |
 | 100milionseek | deepseek-v4.1-flash-free | https://100milionseek.top/v1 | `HMS_API_KEY` |
 
-**Default model:** Pi uses the first model listed in `models.json`
-when no `--model` is given — here that is
-100milionseek/deepseek-v4.1-flash-free. To change the default,
-reorder the providers in `models.json` (on the box and in this repo)
-and restart the gateway (`pi-api.py restart`), then verify with a
-`pi-api.py prompt "..."` call with no `--model` flag.
-
 Keys go in **two** places on the box (both `chmod 600`, both
 box-only):
 
@@ -246,15 +312,38 @@ watcher. Use the gateway's `POST /models` route (via
 `pi-api.py add-model ... --key-stdin`) to add a model + key in one
 call — the key goes in through stdin, never in a file or a prompt.
 
+**After the initial setup, do all of this in the Pi Admin page**
+(see "After setup" above): it loads the provider's live model list,
+lets you tick models and set each one's context/output/reasoning/
+vision, wires the `$ENV` placeholder for you, and has the Make
+default / Test / Remove buttons. The files above are what the page
+edits — know them for debugging, not for daily use. The **default
+model** is `defaultProvider` + `defaultModel` in `settings.json`
+(the repo's copy defaults to 100milionseek/deepseek-v4.1-flash-free);
+a prompt that names no model uses it.
+
 Per-model settings (the values in `pi/settings.json`):
 
 - tokenlab DeepSeek-V4.1-Flash: `contextWindow` 1,048,576 (verified
   via the provider's `/v1/models`), `maxTokens` 16,384.
-- 100milionseek deepseek-v4.1-flash-free: `contextWindow` 198,000,
-  `maxTokens` 65,536. Real-world note: the API's pre-check
-  overestimates tokens (~0.303 tok/char vs ~0.2 real), so the practical
-  max input is ~645K characters, not 198K tokens; every request is
-  charged ~630 prompt tokens even for a tiny prompt.
+- 100milionseek deepseek-v4.1-flash-free — **max profile** (in
+  `pi/models.json`): `contextWindow` **197,488** (the API's enforced
+  hard cap from its own error message; the provider advertises
+  198,000 — do not plan prompts past 197,488), `maxTokens` 65,536,
+  `reasoning: true`, `input: ["text", "image"]` (vision verified),
+  `samplingParams: {"reasoning_effort": "max"}` (Pi merges free-form
+  samplingParams into every request for the model). Real-world
+  notes: the gateway's token *estimate* is stricter than standard
+  tokenizers (~3.3 chars/token), so keep a whole request ≤ ~500K
+  characters; every request is charged ~630 prompt tokens even for
+  a tiny prompt (a hidden wrapper system prompt); streaming is
+  effectively mandatory for big calls (non-streaming can die on a
+  gateway 524); at most 5 parallel requests per account. The same
+  account also exposes `jev-1.13-free` — a **classifier/judge**
+  (System One endpoint), *not* a chat model: Pi reaches classifiers
+  through its codemode tool (`models.classify`), never as a
+  conversation model, so it is deliberately not in `models.json`
+  as a chat entry.
 - All other models: `contextWindow` 128,000, `maxTokens` 16,384
   (documented values where verifiable, kept as-is otherwise).
 - Compaction is on (`reserveTokens` 16384, `keepRecentTokens` 20000),
@@ -281,11 +370,8 @@ Check: `pi-api.py models` lists all six. Then test each one:
 - **moss dies empty on long sessions** (twice returned empty content
   and died without saving on 80+ message runs). Prefer
   xingchi/gpt-6.1-sol for long, multi-step work.
-- **100milionseek keys can die without warning** (two keys so far:
-  one 401'd mid-test, another after ~32 hours of working fine). If a
-  model starts 401ing, rotate its key — generate a fresh one on the
-  dashboard and set it with `pi-api.py setkey HMS_API_KEY` (key via
-  stdin), then restart the gateway.
+- **100milionseek keys can die without warning** (one key 401'd
+  mid-test). If a model starts 401ing, rotate its key.
 
 ### 4. Install the bridge and the gateway on the box
 
@@ -315,8 +401,13 @@ token is the guard, not the bind address.)
 The gateway wraps Pi in RPC mode. Endpoints: `/health`,
 `/sessions`, `/prompt`, `/sessions/{id}/prompt|status|events|stop|
 rename|model|compact`, `/models` (GET/POST/PATCH/DELETE), `/secrets`
-(rotate a provider key), `/restart`, `/rpc`, `/files` (pulls from
-`/root/work` only). Auth is the Bearer token. **Restart the gateway
+(GET names + set booleans only; POST/DELETE rotate or remove a
+provider key — values are never returned), `/restart`, `/rpc`,
+`/files` (pulls from `/root/work` only) — plus the admin surface:
+`/admin` (the Pi Admin page), `/admin-login`, `/settings` (default
+provider/model), `/monid` (the box's Monid credentials) and
+`/provider-models` (fetch a provider's live model list from the
+box). Auth is the Bearer token. **Restart the gateway
 after adding or rotating a key** (`POST /restart`, or
 `pi-api.py restart`).
 
@@ -463,9 +554,20 @@ in `skills/web-research/`:
   the top 5 URLs. If it times out on the X leg, `search` (web-only)
   is the fallback.
 - **Monid key:** only in `~/.config/monid/credentials.yaml`
-  (chmod 600) on the Muse VM, and as `$MONID_API_KEY` on the sandbox.
-  Pi uses the same file at `/root/pi-bridge/search.py` (copy
-  `search/web.py` there).
+  (chmod 600, format `key: "<value>"`) — on the Muse VM **and in
+  the same file on the box** (`/root/.config/monid/credentials.yaml`;
+  the Pi Admin page's Monid card writes it). Pi uses the same tool
+  at `/root/pi-bridge/search.py` — the host setup scripts now
+  install it (and a credentials template) automatically; older
+  bundles needed a manual copy of `search/web.py` there. On the
+  Muse VM the file may instead hold the Monid **connector's
+  surrogate** value: the VM's egress swaps it for the real key on
+  calls to Monid's API, so no raw key sits in a file there. The box
+  always needs the real key, pasted on the box.
+- **DuckDuckGo alone returns nothing.** Verified from both the Muse
+  VM and sandbox egresses: the DDG Lite fallback answers `[]` from
+  datacenter IPs. The Monid/TinyFish leg is load-bearing — without
+  a Monid key, in-server search returns nothing, silently.
 - **Cloudflare-blocked sites:** when a site 403s every direct request
   (even no-auth, even the site root), the egress is blocked, not the
   key. Ladder: (1) `web.py` TinyFish fetch/search first (server-side,
@@ -531,6 +633,24 @@ Pi holds only a request-only token, and Muse unlocks one service + one
 key label for two hours at a time. Pi never sees a key. The vault is a
 separate repo with its own full guide.
 
+Wiring Pi to an existing vault (the usual case — check whether one
+is already deployed before creating anything; a duplicate D1 in the
+wrong Cloudflare account is the known mistake):
+
+1. The vault admin registers agent `pi` with the master secret —
+   only the SHA-256 of Pi's token is stored (`POST /admin/agents`).
+   The master secret itself never travels through chat; it lives in
+   a chmod-600 file on the Muse VM, and scripts read it directly.
+2. Pi's raw token goes in exactly one place: `/root/.pi/agent/mcp.json`
+   on the box (chmod 600), an `mcpServers.vault` entry pointing at
+   the vault's `/mcp` endpoint with the token as a Bearer header and
+   `"exposure": "codemode"`.
+3. Verify with Pi's token: MCP `initialize` answers, `tools/list`
+   shows the GitHub tools + `service_request`, and a call with no
+   grant open returns `unlock_required`. **That locked answer is the
+   success state** — then unlock one service + label for a real
+   granted call to prove the full chain.
+
 ## Optional: test your models
 
 `eval/` has the harness setup used to rate the six models — promptfoo
@@ -589,6 +709,19 @@ howtofix was down, Xingchi unscored by the harnesses.
   with the regex `key:\s*"([^"]+)"` — the file must contain
   `key: "<value>"` (with quotes). A file that says `api_key: <value>`
   is silently ignored and search returns nothing.
+- **`setup-muse.sh` prints the gateway token once, at the end.**
+  Treat the script's whole output as secret — it belongs in
+  `gateway-token.txt` (chmod 600) and `gateway.env`, never in a chat
+  log, issue, or screenshot.
+- **A bundle with empty keys looks ready but is not.** `setup-muse.sh`
+  succeeds with only a warning when key env vars are unset; Pi then
+  installs cleanly and every keyless model fails later, which is much
+  harder to diagnose. Count the empty-key warnings before uploading,
+  or add the keys afterwards in the Pi Admin page.
+- **Altare's Start button has a hidden gate: a linked Discord
+  account.** Without it Start refuses, and the console shows three
+  different confusing statuses that all mean the same gate. Link
+  Discord first (step 1A).
 
 ## Security
 
@@ -612,6 +745,7 @@ howtofix was down, Xingchi unscored by the harnesses.
 
 ```text
 README.md            this guide
+COMPLETE-SETUP.md    the full 2026-11-18 live run — every step, bug, fix, feature
 SETUP-PROMPT.md      the single prompt a friend pastes to their Muse
 setup-muse.sh        Muse-VM setup script (tested end to end)
 setup-sandbox.sh     Altare sandbox setup script (run in the web console)
