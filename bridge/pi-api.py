@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
-"""pi-api.py — Muse-side client for the Pi gateway on the Altare sandbox.
-Config lives next to this script: tailnet-url.txt (preferred) or
-public-url.txt, plus gateway-token.txt (chmod 600, never in chat).
+"""pi-api.py — Muse-side client for the Pi gateway (Altare sandbox or Hoody computer).
+Config lives next to this script: hoody-url.txt (preferred if present),
+tailnet-url.txt, or public-url.txt, plus gateway-token.txt (chmod 600,
+never in chat). The :3130 tunnel proxy applies only to tailnet (100.x)
+URLs; a Hoody https URL goes direct.
 Usage: pi-api.py health | sessions | models | prompt "msg" [--session ID] [--model M]
        pi-api.py status <id> | events <id> | stop <id> | files <path>
 """
 import json, os, sys, urllib.request
-# Config lives next to this script: tailnet-url.txt (preferred) or public-url.txt,
-# plus gateway-token.txt (chmod 600, never in chat). See README for how to fill them.
+# Config lives next to this script: hoody-url.txt, tailnet-url.txt, or
+# public-url.txt (first one found, in that order), plus gateway-token.txt
+# (chmod 600, never in chat). See README for how to fill them.
 D = os.path.dirname(os.path.abspath(__file__))
-TAILNET = os.path.join(D, "tailnet-url.txt")
-URL = open(TAILNET).read().strip() if os.path.exists(TAILNET) else open(os.path.join(D, "public-url.txt")).read().strip()
+URL = None
+for _name in ("hoody-url.txt", "tailnet-url.txt", "public-url.txt"):
+    _p = os.path.join(D, _name)
+    if os.path.exists(_p):
+        URL = open(_p).read().strip()
+        break
+if not URL:
+    raise SystemExit("no gateway URL file found next to pi-api.py "
+                     "(hoody-url.txt, tailnet-url.txt, or public-url.txt)")
 TOK = open(os.path.join(D, "gateway-token.txt")).read().strip()
 
 def _opener():
