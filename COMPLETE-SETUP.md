@@ -827,6 +827,7 @@ correct place for it — but know that it is there.
 | A second Cloudflare/GitHub account is needed | Connect it as a SEPARATE connector — never `reconnect` the first connector with a different account's token, or it is replaced (§1). |
 | Vault keys come from the user's other account | Never deploy a fresh vault with fresh keys on assumption. Ask which account, which Worker, whose keys (§10.1) — a D1 cannot be bound cross-account, so a Worker in another account needs its own D1 + migrations, and the folder must be built with the user's keys (§10.2b). |
 | Vault MCP answers 406 | Missing `Accept: application/json, text/event-stream` (§10.2). |
+| Granted vault `github_read_file` fails with `{"error":"operation_failed","kind":"ZodError"}` | The vault caps file reads at 32 KB (`size: z.number().max(32768)` in `src/github.ts`) — the file is too big (e.g. README.md at 47,658 B). The grant, key and token are fine; read a smaller file, or fetch the big file another way (§10). |
 | Duplicate vault infra appears | Someone deployed already, maybe in another account → check first (§10.1). |
 
 ---
