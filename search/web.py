@@ -4,7 +4,7 @@
 Order (fastest / cheapest first):
   search: 1) TinyFish /free/search via Monid API ($0, 30/min, 500/hr)
           2) cf-search Worker — Bing web/images/videos/news, no key, free
-             (https://cf-search.akamithun-search.workers.dev, plain text)
+             (your own Worker URL — Muse asks you for it, plain text)
   fetch:  1) TinyFish /free/fetch via Monid API ($0, 150 URLs/min, 1000/day)
           2) plain curl (browser UA)
 
@@ -21,13 +21,15 @@ cf-search Worker (Bing, no key):
   GET /search?q=...&vertical=web|images|videos|news&count=1-50
   &setlang=en-IN&cc=IN&time=day|week|month|year&safesearch=moderate
   Returns plain text, one line per result: "N. Title - URL".
-  Set CF_SEARCH_URL to override the default Worker URL.
+  The Worker URL is NEVER hardcoded — it is the user's own Worker,
+  deployed from docs/SEARCH-WORKER.md. Muse ASKS the user for their
+  Worker URL during setup and sets CF_SEARCH_URL (env export).
   Limits (verified 2026-11-19): web/news max 10 per query; pagination
   does NOT work (Bing ignores first= in every form tested — page=2
   returns the same results as page=1); country-wise filtering DOES work
   (setlang+cc change the results). Google News and DuckDuckGo do NOT
   work from Cloudflare's network (503 / 202 bot-challenge). Bing only.
-  Full docs: ~/workspace/cf-search-worker/llms.txt
+  Full docs: search/cf-search-llms.txt (in this repo).
 
 X / social (FxEmbed, no key, UA mandatory):
   base https://fixtweet.twapiworker.workers.dev (clone fixtweet-2...)
@@ -59,7 +61,11 @@ MONID_API = "https://api.monid.ai"
 CONFIG = os.path.expanduser("~/.config/monid/credentials.yaml")
 FX = "https://fixtweet.twapiworker.workers.dev"
 FX2 = "https://fixtweet-2.twapiworker.workers.dev"
-CF_SEARCH_URL = os.environ.get("CF_SEARCH_URL", "https://cf-search.akamithun-search.workers.dev")
+CF_SEARCH_URL = os.environ.get("CF_SEARCH_URL", "")
+# The cf-search Worker URL is NEVER hardcoded here — it is the user's own
+# Worker, deployed from docs/SEARCH-WORKER.md. Muse ASKS the user for their
+# Worker URL during setup and sets CF_SEARCH_URL (env export). If it is
+# empty, the cf-search leg is skipped and TinyFish + X still work.
 UA = {"User-Agent": "Muse/1.0"}
 
 
@@ -125,7 +131,11 @@ def tinyfish_fetch(urls):
 
 
 def cfsearch_search(query, vertical="web", count=10, setlang=None, cc=None, time_range=None):
-    """cf-search Worker (Bing). No key. Returns [{title, url}]. Plain text in, parsed out."""
+    """cf-search Worker (Bing). No key. Returns [{title, url}]. Plain text in, parsed out.
+    Skipped (returns None) when CF_SEARCH_URL is not set — the user's own Worker URL."""
+    if not CF_SEARCH_URL:
+        print("[cf-search] skipped: CF_SEARCH_URL not set (ask the user for their Worker URL)", file=sys.stderr)
+        return None
     params = {"q": query, "vertical": vertical, "count": str(count)}
     if setlang:
         params["setlang"] = setlang
