@@ -556,9 +556,9 @@ in `skills/web-research/`:
   web results from two engines (deduped) + an X ask pack + fetch of
   the top 5 URLs. If it times out on the X leg, `search` (web-only)
   is the fallback.
-- **cf-search Worker (Bing):** `https://cf-search.akamithun-search.workers.dev/search`
-  — plain text, one line per result. Set `CF_SEARCH_URL` to your own
-  Worker URL if you deploy one (guide: `docs/SEARCH-WORKER.md`).
+- **cf-search Worker (Bing):** your own Worker URL — Muse asks you
+  for it during setup and sets `CF_SEARCH_URL` (guide: `docs/SEARCH-WORKER.md`).
+  Plain text, one line per result. The URL is never hardcoded in the repo.
   Country-wise filtering works (setlang+cc); pagination does NOT work
   for web/news (Bing ignores `first=` in every form tested); Google
   News and DuckDuckGo do NOT work from Cloudflare's network. Bing only.
