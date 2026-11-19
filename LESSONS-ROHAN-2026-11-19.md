@@ -381,6 +381,42 @@ own Worker; nothing is deployed for them and no key value ever
 appears in chat. Build the folder with the USER'S keys, not with
 keys generated for a throwaway deploy.
 
+### L26. The vault already exists — use it, never rebuild it (second Muse)
+
+The vault at `https://cf-d1-vault.hardeepwalia77.workers.dev` already
+exists, its D1 already holds the encrypted keys, and its Worker
+secrets (master verifier + DEK) are already set. **Do NOT redeploy
+the Worker and do NOT touch its secrets. No fresh Worker, no fresh
+D1, no fresh keys — nothing to add again.** The owner gives the
+master secret from his MAIN account (the first Muse's
+`vault-master-secret.txt`); he pastes the value himself, never
+through chat. The second Muse is **owner-equal** (owner decision
+2026-11-19): it holds the same master secret and unlocks for
+itself. What the second Muse copies from the first Muse is ONLY the
+master secret value + the vault URL. **No key files, and NOT the DEK
+backup** — that is disaster recovery for the Worker itself; a second
+Muse never needs it. Muse's mistake on 2026-11-19 was doing the
+opposite: it deployed a FRESH vault (new Worker + D1 + fresh master
++ DEK + token) in the QwenPaw account without asking, then built a
+paste-ready folder for a fresh deploy — all of it duplicate and
+wrong, because the vault already existed. The first question is
+always: does the vault already exist at a known URL? If yes, stop
+— use it.
+
+### L27. Each Muse/agent gets its OWN agent_id and token — never reuse pi's
+
+Holding the master secret, the second Muse registers **its own new
+agent_id** in the vault and receives its own request-only bearer
+token. Never reuse agent `pi`'s token and never give the second
+agent the first agent's identity. The master secret makes it an
+admin; the agent token is still what day-to-day service requests
+use. Grants last exactly 2 hours (`expires_at = opened_at + 7200`);
+re-unlocking is routine, not an error. Correction to an earlier
+message in this chat: the Pi-token SHA-256 I handed Rohan was for
+the token generated for the WRONG (fresh QwenPaw) vault — it must
+NOT be registered on the real vault. The real vault gets a fresh
+agent_id + token made with the real master secret.
+
 ## Checklist to fold into SETUP-PROMPT.md §6 (Rules while you work)
 
 - Re-read SETUP-PROMPT.md and COMPLETE-SETUP.md in full before any
