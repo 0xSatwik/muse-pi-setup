@@ -63,6 +63,27 @@ Three fixes shipped with it:
   whole single-threaded server. Malformed bodies now yield `{}` and
   the route responds normally.
 
+Later the same day (2026-11-20, ~04:50 IST) the page was browser-tested
+unlocked and found working except for one thing: **old chats would not
+open at all.** Root cause was the page's own HTML sanitizer — `set()`
+allow-lists tags and attributes, and it was silently stripping
+`data-act` (so session clicks did nothing), `data-q` (suggestion chips
+dead), `<option>`/`<optgroup>` + `value`/`selected` (model dropdown
+rendered empty) and `<button>` (the *Show older* button came out as
+dead text). Fixed by widening the allow-list, building the model
+dropdown with DOM APIs instead of `set()` (the HTML parser drops
+`<option>` outside a `<select>`), and routing the Show-older button
+through the same click delegation as everything else. The same test
+also caught: the drawer header (+ New, search) hidden behind the
+blurred topbar on narrow screens (drawer `z-index` raised above it);
+duplicate rows for timestamped snapshot files (deduped by base id);
+and a persistent `Sessions: HTTP 502` toast — `/sessions` re-read and
+JSON-parsed every session file on each poll (~8 s), so the gateway now
+only parses header/model lines (~1 s cold), caches the list 30 s, and
+listens with a 128-deep backlog. It also returns each session's model
+now, so the sidebar shows it without opening the transcript.
+Patches: `bridge/patch-sanfix.py`, `bridge/patch-scanfix.py`.
+
 Two operating rules that bit during the build, now in the setup docs:
 the gateway **must** be started with `pi` on PATH
 (`PATH=/root/.pi/agent/bin:$PATH`, otherwise every prompt fails with
