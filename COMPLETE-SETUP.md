@@ -419,7 +419,39 @@ the check is a question to the user, not just an API list. If the
 user has an existing Worker, do NOT create a fresh Worker/D1/keys —
 use the existing-Worker path (§10.2b) instead.
 
-### 10.2 Fresh deploy (only if nothing exists)
+### 10.1a Vault already deployed (second Muse) — use it, rebuild nothing
+
+If the vault already exists at a known URL (for example
+`https://cf-d1-vault.hardeepwalia77.workers.dev`, MCP at `/mcp`),
+**stop: do NOT redeploy the Worker, do NOT touch its secrets, do
+NOT create a fresh D1 or fresh keys — nothing to add again.** The
+D1 already holds the encrypted keys; the Worker's secrets (master
+verifier + DEK) are already set. The flow is:
+
+1. The owner gives the master secret from his MAIN account (the
+   first Muse's `vault-master-secret.txt`). He pastes the value
+   himself into this Muse's `vault-master-secret.txt` (chmod 600) —
+   never through chat, never printed, logged or committed.
+2. This Muse is **owner-equal** (owner decision 2026-11-19): it
+   holds the same master secret and unlocks for itself. It copies
+   ONLY the master secret value + the vault URL from the first
+   Muse. **No key files, and NOT the DEK backup** — that is disaster
+   recovery for the Worker itself; a second Muse never needs it.
+3. Holding the master secret, this Muse registers **its own new
+   agent_id** in the vault (never reuse agent `pi`'s token, never
+   take the first agent's identity) and stores its own request-only
+   bearer token in its MCP client config, pointing at the existing
+   `/mcp` URL.
+4. It records the unlock procedure (POST `/unlock` with the master
+   bearer, `agent_id` + `service` + `key_label` + a fresh UUID
+   `request_id`; grants last exactly 2 hours), the service +
+   key_label pairs it may use, and the never-print rule for the
+   master secret — in a connector doc / skill.
+5. Verify: MCP `initialize` with its own token → serverInfo
+   `cf-d1-vault`; `tools/list` OK; a locked call →
+   `unlock_required`; one granted call → real response.
+
+### 10.2 Fresh deploy (only if no vault exists anywhere)
 
 Follow this repo's README: create the D1 database, note its id into
 `wrangler.toml` (the shipped file contains the author's values — replace
@@ -583,7 +615,8 @@ correct place for it — but know that it is there.
       never request page > 1.
 - [ ] Hallmark `SKILL.md` present on both sides.
 - [ ] Vault: account, Worker and key source confirmed with the user
-      BEFORE any deploy (§10.1); master `/whoami` → master; Pi-token MCP `tools/list` OK;
+      BEFORE any deploy (§10.1); if the vault already exists at a
+      known URL, use it — no redeploy, no fresh keys (§10.1a); master `/whoami` → master; Pi-token MCP `tools/list` OK;
       locked call → `unlock_required`; one granted call → real response.
 - [ ] No secret value appears in any chat, prompt, log or repo file.
 
