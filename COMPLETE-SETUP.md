@@ -981,3 +981,31 @@ per-attempt logs:
   prompt opens "Continue from where you left off", one step per prompt; the
   finish of a step triggers verification + the next prompt — by the supervisor
   on its 30-min pass or immediately — never left idle waiting to be reminded.
+
+
+## Lesson 24 — unlock_required is routine: the admin agent unlocks, grants last 2 hours (2026-11-19)
+
+Pi finished a fix, tried to push, and reported the push "blocked — the vault
+refuses every key label with unlock_required". The assistant initially passed
+this to the owner as an owner-only blocker. WRONG — the owner had to remind
+the assistant how its own vault works (§10.5 of the vault guide already said
+it plainly: "Pi hits unlock_required → the assistant unlocks").
+
+The mechanics, so no future instance repeats the mistake:
+
+- A grant authorizes ONE agent to use ONE service + key label for **2 hours**
+  (expires_at = opened_at + 7200). Expiry mid-program is normal and expected.
+- The agent (Pi) holds a request-only bearer and **cannot unlock itself** —
+  a locked call returns {"error":"unlock_required", ...} by design.
+- **The assistant IS the vault admin.** The master secret lives in a
+  600-perm file in the assistant's own workspace (vault-master-secret.txt —
+  never print it). Unlocking is one call:
+  POST <vault-origin>/unlock, header `Authorization: Bearer <master>`,
+  body {"agent_id":"pi","service":"<service>","key_label":"<label>",
+  "request_id":<fresh uuid>} → 200 with the grant id and expires_at.
+  Replaying a request_id returns the original grant; use a fresh one per
+  unlock.
+- Correct handling when a worker reports unlock_required: unlock immediately,
+  prompt the worker to retry, move on. Never present it as an owner blocker,
+  never leave work parked on it. The standing supervisor job carries the same
+  instruction, so the unlock happens even between conversations.
