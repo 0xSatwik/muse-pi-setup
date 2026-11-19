@@ -5,7 +5,7 @@ results as clean plain text, built for AI agents (Pi, Muse) that need
 fast, free, filterable search without an API key. It is the second leg
 of the combined search in `web.py`, alongside TinyFish via Monid.
 
-- Live URL: `https://cf-search.akamithun-search.workers.dev`
+- Live URL: YOUR Worker URL (e.g. `https://cf-search.<your-subdomain>.workers.dev`) — Muse asks you for it during setup; it is never hardcoded in the repo.
 - No auth, no key, no sign-in. Free tier Worker.
 - One endpoint: `GET/POST /search`. Health: `GET /health` returns
   `ok cf-search web images videos news`.
