@@ -16,6 +16,70 @@ directly over HTTPS through the Hoody proxy — no Tailscale, no tunnel,
 no fallback bridge. Pi never sees your keys for other services — for
 that, see the companion vault below.
 
+## What changed — 2026-11-20: `/pi`, a full chat UI in the browser
+
+The gateway always had an `/admin` page for keys and models, and
+everything else happened through the CLI (`pi-api.py`, the watcher
+queue). There was no way to actually *talk* to a session from a
+browser. `/pi` closes that gap: a single self-contained HTML file
+(`bridge/pi.html`) served by the same gateway on the same port, using
+the same sessions, the same auth (opening password or gateway token)
+and the same RPC processes. Full detail: [`docs/PI-CHAT.md`](docs/PI-CHAT.md).
+
+| | Before | After |
+|---|---|---|
+| Models & keys | `/admin` in the browser | unchanged |
+| Chatting | CLI only | `/pi` in the browser, or CLI — same sessions |
+| Auth | gateway token / opening password | **identical** — no new scheme |
+| Model quota | — | **no extra quota** — `/pi` drives the same `pi --mode rpc` process per session |
+
+What it does: session sidebar (name, model, message count, running
+dot, searchable), full transcript with markdown, collapsible thinking
+and tool calls, composer (`Enter` sends, `Shift+Enter` newline, Send
+becomes Queue while running, Stop button), New chat, model switcher,
+Compact, Rename, Delete with confirm, live updates (events polling
+every 2 s while running, 10 s otherwise — free tunnel traffic, no
+model quota), and a **system stats bar** — CPU / RAM / Disk as progress
+bars, refreshed every 5 s. Dark and light themes, mobile layout, no
+external CDN. Opening the page costs nothing; only sending a prompt
+spends model tokens. No Cloudflare Worker requests at all — everything
+goes through the tunnel to the gateway on the box.
+
+Three fixes shipped with it:
+
+- **Freeze fix.** The first cut rebuilt the entire transcript on
+  every streamed token — on a 2000-message session the page froze
+  solid. Now only the live streaming bubble updates per token, the
+  transcript renders the last 100 messages with a *Show older*
+  button, and the sidebar only re-renders when the list actually
+  changes (154 ms → 30 ms per render; 30 token deltas went from
+  ~4,630 ms of blocking JS to 0.2 ms).
+- **Disk stat fix.** `/stats` used to report the 845 GB host overlay
+  (51%) against a "10 GiB" label. Disk is now the sandbox's own
+  workspace footprint against the plan quota (40% at 4.03 GB / 10 GiB);
+  host numbers are still returned under `disk.host` for reference.
+- **Gateway crash fix.** `_body()` called `json.loads()` on whatever
+  arrived and let the exception escape — one non-JSON POST killed the
+  whole single-threaded server. Malformed bodies now yield `{}` and
+  the route responds normally.
+
+Two operating rules that bit during the build, now in the setup docs:
+the gateway **must** be started with `pi` on PATH
+(`PATH=/root/.pi/agent/bin:$PATH`, otherwise every prompt fails with
+`FileNotFoundError: pi`), and its output goes to
+`/root/pi-bridge/gateway.log` so a crash leaves a trace. Existing
+boxes upgrade in ~1 minute: copy the new `pi.html`, apply the patch
+if `/pi` 404s, restart the gateway only — see
+[`docs/PI-CHAT.md`](docs/PI-CHAT.md) §B. The patch itself is
+documented in [`docs/PI-CHAT-PATCH.md`](docs/PI-CHAT-PATCH.md).
+
+Other changes today: the cf-search Worker now serves its API
+reference at `/llm.txt` and `/llms.txt`; the Worker URL is no longer
+hardcoded anywhere in the repo (`search.py` reads `CF_SEARCH_URL`
+from the environment and skips that leg when unset); both `llms.txt`
+files are checked in; and the `pi_delegation` skill documents how
+Muse hands long work to Pi.
+
 ## Start here — one prompt, two scripts
 
 **If you are a friend who got this repo:** paste
@@ -205,28 +269,21 @@ Team API tokens **cannot** create a sandbox (the API returns 403
 `TOKEN_ROUTE_NOT_ALLOWED` by design). Create it in the Altare web
 console while logged in:
 
-1. **Check Account → Discord first** (Account → Discord). If it
-   already says "Linked", there is no gate. Only if it is unlinked
-   must you link it: an unlinked account cannot start apps — Start
-   refuses with "Link Discord to start your app". Only the account
-   owner can do this step. After linking, Start may still queue
-   ("Waiting for room on the node") — that is normal on the free
-   node, not a failure. **Free-tier Start takes ~25–30 minutes end
-   to end** (node queue ~15 min, then ~10 min pulling the container
-   image); the Apps page can briefly show "server unavailable" while
-   starting — it clears on its own.
+1. **Link your Discord account first** (Account → Discord → Link).
+   An unlinked account cannot start apps: Start refuses with "Link
+   Discord to start your app". Only the account owner can do this
+   step. After linking, Start may still queue ("Waiting for room on
+   the node") — that is normal on the free node, not a failure.
 2. Add your SSH public key to the **team** first (Team → Settings →
    SSH keys) — keys are picked from the team list at creation.
 3. Create the sandbox via **Apps → Create app → Software →
-   Sandboxes**: name it `pi`, Ubuntu 24.04, any region (one comes
-   pre-selected), the whole free pool (6 GiB RAM, 150% CPU, 10 GiB
-   disk — resources are not sliders; the sandbox takes the team's
-   pool). No payment prompt appears on the free tier.
+   Sandboxes**: Ubuntu 24.04, any region (one comes pre-selected),
+   the whole free pool (6 GiB RAM, 150% CPU, 10 GiB disk — resources
+   are not sliders; the sandbox takes the team's pool). No payment
+   prompt appears on the free tier.
 4. Note the server ID (the UUID in the server URL — that is the one
    APIs use; the short ID on the Overview page is not), the SSH
-   host/port, and your team ID. Ground truth for existence is the
-   servers LIST endpoint (`GET /tenants/<team>/servers`) — the
-   single-server GET returns 403 for the team token.
+   host/port, and your team ID.
 5. **Verify before continuing:** the Apps page must list the sandbox
    with non-zero resources. "Account created" is not "sandbox
    created" — if Apps is empty, creation did not happen; redo it,
@@ -243,16 +300,9 @@ modules, no TUN device, no systemd**. Long-running processes go in
 network allocation exists (the SSH port); the gateway is reachable
 only over Tailscale (step 5A) or the cloudflared tunnel fallback.
 
-Direct SSH from a Muse VM is blocked by default by the VM's egress
-proxy (connection reset) — but it works once the user enables the
-egress settings. Try it (`ssh -i ~/.ssh/id_ed25519 -p <port>
-root@<node>.altare.global`, host/port from the console's server
-details); if it fails, control the sandbox through the web console,
-the Files API (`bridge/muse-pi.py`), and the tailnet. SSH reads
-known_hosts from the passwd home (`/root/.ssh/` for uid 0), not
-`$HOME` — `/root` is ephemeral across VM replacements, so after a
-replacement re-add the keyscan key to `/root/.ssh/known_hosts`
-(and keep a persistent copy in `~/.ssh/known_hosts`).
+Direct SSH from a Muse VM is usually blocked by the VM's egress proxy
+(connection reset). Do not fight it — control the sandbox through the
+web console, the Files API (`bridge/muse-pi.py`), and the tailnet.
 
 ### 1B. Create the Hoody computer (manual — 5 minutes)
 
@@ -324,16 +374,6 @@ box-only):
 2. `/root/.profile` and `/root/.bashrc` — `export XINGCHI_API_KEY=...`
    lines, so interactive shells and the file-queue watcher see them.
 
-**Both stores must have the keys, or one of the two paths silently
-has no models.** The Pi Admin page writes `provider-keys.env` ONLY —
-a key added there works on the gateway path while the fallback path
-fails with "No API key found". After any key change: sync the exports
-into `/root/.profile` + `/root/.bashrc` (a script that reads
-`provider-keys.env` and appends `export NAME='...'` lines, never
-printing a value), restart the gateway (`pi-api.py restart`) and
-restart the watcher (`tmux kill-session -t pi-bridge`, then recreate
-it running `watcher.py`).
-
 **Lesson:** a long-running process started *before* a key is added
 does **not** see it — `.profile` only affects new shells. After adding
 or rotating a key, restart the gateway (`pi-api.py restart`) and the
@@ -401,22 +441,25 @@ Check: `pi-api.py models` lists all six. Then test each one:
 
 ### 4. Install the bridge and the gateway on the box
 
-Copy `bridge/pi-gateway.py` and `bridge/watcher.py` to
-`/root/pi-bridge/` on the box (Altare: via the web console or
-`muse-pi.py put` once the bridge is up — chicken-and-egg: use the
-console the first time. Hoody: `setup-hoody.sh` fetches them from this
-repo itself).
+Copy `bridge/pi-gateway.py`, `bridge/pi.html` and
+`bridge/watcher.py` to `/root/pi-bridge/` on the box (Altare: via the
+web console or `muse-pi.py put` once the bridge is up —
+chicken-and-egg: use the console the first time. Hoody:
+`setup-hoody.sh` fetches them from this repo itself). `pi.html` is
+the `/pi` chat page — the gateway serves it from disk on every
+request, so updating the page later is just copying the file, no
+restart.
 
 **Gateway** (primary path, HTTP API — over the tailnet on Altare,
 direct HTTPS on Hoody):
 
 ```bash
 # on the box, in tmux
-tmux new -s pi-gateway
-cd /root/pi-bridge
 # generate a long random Bearer token, save it to gateway.env (chmod 600)
 python3 -c "import secrets; print(secrets.token_hex(32))"  # put it in gateway.env as PI_GATEWAY_TOKEN=<token>
-python3 pi-gateway.py   # listens on 127.0.0.1:8765 by default
+# Pi MUST be on PATH for the gateway process, or every prompt fails
+# with FileNotFoundError: pi. Log output so a crash leaves a trace.
+tmux new -s pi-gateway -d 'PATH=/root/.pi/agent/bin:$PATH exec python3 /root/pi-bridge/pi-gateway.py >> /root/pi-bridge/gateway.log 2>&1'
 ```
 
 The gateway binds `127.0.0.1` by default. **On Hoody it must bind
@@ -431,9 +474,12 @@ rename|model|compact`, `/models` (GET/POST/PATCH/DELETE), `/secrets`
 provider key — values are never returned), `/restart`, `/rpc`,
 `/files` (pulls from `/root/work` only) — plus the admin surface:
 `/admin` (the Pi Admin page), `/admin-login`, `/settings` (default
-provider/model), `/monid` (the box's Monid credentials) and
+provider/model), `/monid` (the box's Monid credentials),
 `/provider-models` (fetch a provider's live model list from the
-box). Auth is the Bearer token. **Restart the gateway
+box), and the chat surface: `/pi` (the Pi Chat page, same login as
+`/admin`) and `/stats` (live sandbox CPU / RAM / disk — disk is the
+workspace footprint against the plan quota, not the host overlay).
+Auth is the Bearer token. **Restart the gateway
 after adding or rotating a key** (`POST /restart`, or
 `pi-api.py restart`).
 
@@ -498,17 +544,7 @@ working setup (verified live, full report in
 11. Fallback: a cloudflared tunnel on the sandbox gives a public URL
     (save it as `bridge/public-url.txt`). Note: some Muse VMs get 403
     on `trycloudflare.com` from their egress proxy, so the tunnel is a
-    fallback only, not the primary path. For the permanent URL use a
-    **named tunnel** (see "After setup" above): create it only after
-    the gateway is running, list `tunnels` and `zones` on the account
-    first and create only what is missing — never touch a tunnel you
-    did not create. Its DNS CNAME MUST be proxied (orange cloud).
-    **Never restart cloudflared inside its tmux session** — kill the
-    session and recreate it, or the tunnel dies with the session.
-    Scripted calls through the tunnel need a real browser User-Agent
-    (plain urllib gets Cloudflare 1010), and tunnel POSTs can be
-    flaky under node load — retry twice before concluding anything
-    is broken.
+    fallback only, not the primary path.
 
 Check: `pi-api.py health` returns `{"ok": true}`.
 
@@ -568,23 +604,13 @@ Copy `bridge/` to your Muse VM (e.g.
   connected Altare Platform credential (Muse connector) for the Files
   API. Commands: `ask`, `send`, `get`, `list`, `status`, `put`,
   `getfile` (reads only under `/root/work/` on the sandbox).
-  `put` paths are relative to `/root/work/` — the bridge prepends
-  it, so `put <local> /root/work/file` lands doubled at
-  `/root/work/root/work/file`; pass just the filename or a relative
-  path, and `ls` the box to confirm. `get <id>` dying with an Altare
-  API 502 means the outbox result file does not exist yet — the task
-  may still be running, or its deliverable may already be on the box:
-  check over SSH and fetch with `scp`; judge a Pi task by its
-  deliverable, not by its receipt.
 
 Copy the gateway token into `bridge/gateway-token.txt` (chmod 600).
 Generate it fresh — never reuse someone else's, never put it in chat.
 
 Check: `pi-api.py prompt "Say OK" --model xingchi/gpt-6.1-sol`
-returns `{"disposition": "started", ...}` — that is the async reply;
-read the OK back with `pi-api.py status <id>`
-(`last_assistant_text`). `muse-pi.py ask --model moss/nex-n2.6
---prompt "Say OK"` answers `OK` directly.
+answers `OK`, and `muse-pi.py ask --model moss/nex-n2.6 --prompt
+"Say OK"` also answers `OK`.
 
 ### 7. Search and fetch (both Muse and Pi)
 
@@ -600,29 +626,12 @@ in `skills/web-research/`:
   web results from two engines (deduped) + an X ask pack + fetch of
   the top 5 URLs. If it times out on the X leg, `search` (web-only)
   is the fallback.
-- **The search rule: BOTH engines, every time, never a fallback.**
-  `search` runs TinyFish AND the cf-search Worker on the same query
-  concurrently, merges the URLs and dedupes them. If one engine
-  fails, the other's results are still returned and the failure is
-  reported on stderr (and in `--meta`) — never TinyFish-only with
-  Bing as a fallback. Check `--meta`: both engines must contribute.
-- **cf-search Worker (Bing):** `https://cf-search.akamithun-search.workers.dev/search`
-  — plain text, one line per result. Set `CF_SEARCH_URL` to your own
-  Worker URL if you deploy one (guide: `docs/SEARCH-WORKER.md`).
-  Full filter set: `vertical` web|images|videos|news, `count`
-  (web/news max 10), `setlang`, `cc`, `mkt`, `safesearch`
-  off|moderate|strict, `time` day|week|month|year, `sort` date|relevance
-  (news), `size`/`color`/`imgtype`/`face`/`license` (images),
-  `duration`/`resolution` (videos). Country-wise filtering works
-  (setlang+cc); pagination does NOT work for web/news (Bing ignores
-  `first=` in every form tested — **never request page > 1 for
-  web/news**; page=2 returns the identical results as page=1, so the
-  tool refuses it and `--widen` runs extra calls with different
-  filter sets instead; page>1 is only sent for images/videos).
-  An `Error: upstream_failed` line in a 200 response means NO
-  RESULTS, not a crash — retry once, then return empty for that
-  engine. Google News and DuckDuckGo do NOT work from Cloudflare's
-  network. Bing only.
+- **cf-search Worker (Bing):** your own Worker URL — Muse asks you
+  for it during setup and sets `CF_SEARCH_URL` (guide: `docs/SEARCH-WORKER.md`).
+  Plain text, one line per result. The URL is never hardcoded in the repo.
+  Country-wise filtering works (setlang+cc); pagination does NOT work
+  for web/news (Bing ignores `first=` in every form tested); Google
+  News and DuckDuckGo do NOT work from Cloudflare's network. Bing only.
 - **Monid key:** only in `~/.config/monid/credentials.yaml`
   (chmod 600, format `key: "<value>"`) — on the Muse VM **and in
   the same file on the box** (`/root/.config/monid/credentials.yaml`;
@@ -678,23 +687,21 @@ Run these in order; all of them should pass:
 ```bash
 pi-api.py health                                  # {"ok": true}
 pi-api.py models                                  # all six models listed
-pi-api.py prompt "Say OK" --model xingchi/gpt-6.1-sol   # {"disposition": "started", ...}
-pi-api.py status <id>                             # last_assistant_text.text == "OK"
+pi-api.py prompt "Say OK" --model xingchi/gpt-6.1-sol   # OK
+pi-api.py prompt "Say OK" --model xingchi/gpt-6-astra   # OK
+pi-api.py prompt "Say OK" --model moss/nex-n2.6         # OK
 muse-pi.py ask --model moss/nex-n2.6 --prompt "Say OK"  # OK (Altare fallback path)
 python3 search/web.py research "pi agent"         # web results + fetches
 ```
 
-The gateway `prompt` is async — it returns `started` and a session
-id, not the answer. Read the answer back with `status` (or
-`events`). If the gateway path fails but the bridge path works
-(Altare), the tailnet is the problem (check Tailscale on both
-machines and the `:3130` proxy). If the Hoody URL fails, curl it
-directly — if the localhost health check passes but the public URL
-does not, the gateway may be bound to `127.0.0.1` instead of
-`0.0.0.0` (restart it with `PI_GATEWAY_HOST=0.0.0.0`), or the URL
-is wrong (re-derive it from the terminal URL). If both fail, check
-the tmux sessions on the box (`tmux ls` — `pi-gateway` and
-`pi-bridge` must both be alive).
+If the gateway path fails but the bridge path works (Altare), the
+tailnet is the problem (check Tailscale on both machines and the
+`:3130` proxy). If the Hoody URL fails, curl it directly — if the
+localhost health check passes but the public URL does not, the
+gateway may be bound to `127.0.0.1` instead of `0.0.0.0` (restart it
+with `PI_GATEWAY_HOST=0.0.0.0`), or the URL is wrong (re-derive it
+from the terminal URL). If both fail, check the tmux sessions on the
+box (`tmux ls` — `pi-gateway` and `pi-bridge` must both be alive).
 
 ## Pi packages (context, MCP, memory, code feedback)
 
@@ -728,14 +735,6 @@ Pi holds only a request-only token, and Muse unlocks one service + one
 key label for two hours at a time. Pi never sees a key. The vault is a
 separate repo with its own full guide.
 
-**Ask first, before creating anything:** which Cloudflare account
-holds your Worker, what is the Worker's name/URL, and where do the
-master password, the DEK and Pi's token come from — yours from an
-existing setup, or generate fresh? A D1 cannot be bound to a Worker
-in a different Cloudflare account, and listing one account's
-Workers/D1s can never find a vault in another account — the check is
-a question to the user, not just an API list.
-
 Wiring Pi to an existing vault (the usual case — check whether one
 is already deployed before creating anything; a duplicate D1 in the
 wrong Cloudflare account is the known mistake):
@@ -753,18 +752,6 @@ wrong Cloudflare account is the known mistake):
    grant open returns `unlock_required`. **That locked answer is the
    success state** — then unlock one service + label for a real
    granted call to prove the full chain.
-
-If the vault already exists at a known URL, use it — **do NOT
-redeploy it and do NOT make fresh keys.** The owner gives the master
-secret from his main account (pasted by him, never through chat);
-this Muse is owner-equal, registers its OWN agent_id + token on that
-vault (never reuse agent `pi`'s token), and unlocks for itself. Only
-the master secret value + the vault URL are copied from the first
-Muse — no key files, and NOT the DEK backup. If the user has their
-own Worker but no vault yet, build a paste-ready folder with the
-vault files, steps and their key files for their Worker instead of
-deploying a fresh one. A fresh deploy is only for when no vault
-exists anywhere.
 
 ## Optional: test your models
 
@@ -835,29 +822,8 @@ howtofix was down, Xingchi unscored by the harnesses.
   or add the keys afterwards in the Pi Admin page.
 - **Altare's Start button has a hidden gate: a linked Discord
   account.** Without it Start refuses, and the console shows three
-  different confusing statuses that all mean the same gate. Check
-  Account → Discord first — if it already says "Linked", there is
-  no gate. Link Discord first (step 1A).
-- **Never hand-transcribe a generated secret from tool output.**
-  Verify it by hash before giving it to anyone; for the Admin
-  opening password, author the value yourself (stdin, never output)
-  — a word passphrase is the human-copyable form.
-- **A `muse-pi.py get` 502 means the result is not ready yet, not
-  that the task failed.** The Files API 502s on a missing outbox
-  path. Check the box over SSH and fetch the deliverable with `scp`;
-  judge a Pi task by its deliverable, not by its receipt.
-- **`muse-pi.py put` prepends `/root/work/`** to the remote path —
-  pass relative paths, never absolute `/root/work/...` paths.
-- **SSH host keys are lost on VM replacement.** SSH reads known_hosts
-  from the passwd home (`/root/.ssh/` for uid 0), not `$HOME`, and
-  `/root` is ephemeral — re-add the keyscan key after a replacement.
-- **Tunnel POSTs are flaky under node load** — retry twice before
-  concluding anything is broken, and count retries against the
-  5-failure Admin lockout. A lagging console pane is not the tunnel
-  state — trust the Cloudflare API + direct SSH over it.
-- **A second Cloudflare/GitHub account needs a second connector.**
-  Never `reconnect` the first connector with a different account's
-  token, or it is replaced.
+  different confusing statuses that all mean the same gate. Link
+  Discord first (step 1A).
 
 ## Security
 
