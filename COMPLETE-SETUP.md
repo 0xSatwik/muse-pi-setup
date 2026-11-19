@@ -400,12 +400,32 @@ deployment (`GET /` manual page, `/whoami` 401 without a bearer) — and
 only create what is actually missing. Deleting a duplicate needs the
 user's explicit word.
 
+**Ask FIRST, before any vault work — three questions, all three
+answered before anything is created:**
+
+1. Which Cloudflare account holds your Worker? (The connected
+   account may not be it.)
+2. What is the Worker's name / URL — do you already have one?
+3. Where do the master password, the DEK and Pi's token come from —
+   yours from an existing setup, or generate fresh?
+
+**Why the questions matter:** a D1 database can only be bound to a
+Worker in the SAME Cloudflare account — a D1 in account A cannot be
+attached to a Worker in account B. And keys generated for a fresh
+deploy are not the user's keys: if the user has an existing Worker
+and keys, a fresh deploy builds the wrong vault. Listing one
+account's Workers/D1s can never find a vault in another account, so
+the check is a question to the user, not just an API list. If the
+user has an existing Worker, do NOT create a fresh Worker/D1/keys —
+use the existing-Worker path (§10.2b) instead.
+
 ### 10.2 Fresh deploy (only if nothing exists)
 
 Follow this repo's README: create the D1 database, note its id into
 `wrangler.toml` (the shipped file contains the author's values — replace
-them), set `PUBLIC_ORIGIN` to **your** deployment origin, apply both
-migrations (`0001_init`, `0002_multi_service`), generate the secrets with
+them), set `PUBLIC_ORIGIN` to **your** deployment origin, apply all
+three migrations in order (`0001_init`, `0002_multi_service`,
+`0003_rename`), generate the secrets with
 the repo's script (`scripts/gen-secrets.mjs` → master secret, human
 password, DEK), set them as Worker secrets, deploy, and sanity-check with
 the README's curl chain (root page 200, `/whoami` 401 → master role,
@@ -419,6 +439,26 @@ access is via a connector surrogate, wrangler needs it injected as
 when testing the manual page's redirects with curl, use
 `redirect: "manual"` semantics — a followed redirect hides the real
 status.
+
+### 10.2b Existing Worker path (the user has their own Worker/keys)
+
+Do not deploy anything. Build one paste-ready folder (e.g.
+`vault-your-worker/`) holding the whole program (`src/`, `public/`,
+`migrations/`, `package.json`, `tsconfig.json`, `wrangler.toml` with
+the Worker's name and `PUBLIC_ORIGIN` filled in — or placeholders if
+the user has not named it yet), a `00-START-HERE.md` with the exact
+steps (copy files in, `npm install`, `npm run check`, `npm test`,
+deploy, set secrets, register agent `pi`, add keys on the manual
+page, point Pi at the Worker's URL), a `KEYS.md` saying which secret
+goes where, and the USER'S key files (chmod 600) — never keys
+generated for a throwaway deploy. If the Worker's account already
+has a `cf-vault` D1 with the migrations applied, bind it (keep its
+`database_id` in `wrangler.toml`) and skip the migrations; if the
+Worker is in a different account, the D1 must be created in THAT
+account and all three migrations run there — a D1 cannot be bound
+cross-account. The user deploys, or hands over the Worker name so
+the config can be finished for them. No key value ever appears in
+chat, a prompt, a log or the repo.
 
 ### 10.3 Secret file layout (names and places — values never in chat)
 
@@ -537,8 +577,13 @@ correct place for it — but know that it is there.
       add → PATCH → delete round-trip on a scratch provider is clean.
 - [ ] On-box search returns real TinyFish results, no 401; research mode
       survives a slow X leg.
+- [ ] Search is combined on every call: `search` runs TinyFish AND the
+      cf-search Worker together and merges/dedupes (never one as a
+      fallback); `search-cf` exposes the full Bing filter set; web/news
+      never request page > 1.
 - [ ] Hallmark `SKILL.md` present on both sides.
-- [ ] Vault: master `/whoami` → master; Pi-token MCP `tools/list` OK;
+- [ ] Vault: account, Worker and key source confirmed with the user
+      BEFORE any deploy (§10.1); master `/whoami` → master; Pi-token MCP `tools/list` OK;
       locked call → `unlock_required`; one granted call → real response.
 - [ ] No secret value appears in any chat, prompt, log or repo file.
 
@@ -561,6 +606,8 @@ correct place for it — but know that it is there.
 | `research` crashes on X leg | FxEmbed > 60 s timeout uncaught → try/except fix (§8). |
 | `npx skills add` finds no skills | Skill not at repo root → manual copy route (§9). |
 | Binary won't upload via bridge | Bridge is text-only → base64 + decode on the box (§9). |
+| `muse-pi.py get` dies with Altare API 502 | The outbox result file does not exist yet — the Files API 502s on a missing path. The task may still be running, or its deliverable may already be on the box. Do not loop `get` and do not call the task failed: check the box over SSH (`ls /root/pi-bridge/outbox/`, `ls` the deliverable) and fetch it with `scp`. |
+| Vault keys come from the user's other account | Never deploy a fresh vault with fresh keys on assumption. Ask which account, which Worker, whose keys (§10.1) — a D1 cannot be bound cross-account, so a Worker in another account needs its own D1 + migrations, and the folder must be built with the user's keys (§10.2b). |
 | Vault MCP answers 406 | Missing `Accept: application/json, text/event-stream` (§10.2). |
 | Duplicate vault infra appears | Someone deployed already, maybe in another account → check first (§10.1). |
 
