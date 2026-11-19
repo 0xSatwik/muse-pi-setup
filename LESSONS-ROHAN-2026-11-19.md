@@ -325,6 +325,62 @@ it as a custom skill (`pi-delegation`) in Muse so the delegation
 flow is the default for long/heavy work, not something remembered
 from the repo each time.
 
+### L22. Vault: ask which account, which Worker, whose keys — BEFORE deploying anything
+
+On 2026-11-19 Muse deployed a FRESH vault (new Worker `cf-d1-vault`,
+new D1 `cf-vault`, fresh master password + DEK + Pi token) in the
+connected QwenPaw Cloudflare account — without asking. Rohan then
+said the keys come from his OTHER account and he has his own Worker.
+The fresh deploy was the wrong thing to build: its keys are not his
+keys, and its D1 cannot be bound to a Worker in a different
+Cloudflare account (D1 bindings are same-account only). The fix is
+a question asked FIRST, before any vault work: which Cloudflare
+account holds your Worker, what is the Worker's name/URL, and where
+do the master password, DEK and Pi token come from (yours, or
+generate fresh)? If the user has an existing Worker and keys, do NOT
+create a fresh Worker/D1/keys — package the vault files for their
+Worker instead (code + steps + key files in one folder, e.g.
+`vault-your-worker/`), and let them deploy or hand over the Worker
+name so the config can be finished for it. The §10.1 "check what
+already exists" must cover OTHER accounts, not just the connected
+one — listing one account's Workers/D1s can never find a vault in
+another account.
+
+### L23. `muse-pi.py get` 502 means "result not ready yet" — not "task failed"
+
+Twice on 2026-11-19 `muse-pi.py get <id>` died with `Altare API
+HTTP 502` while reading `/root/pi-bridge/outbox/<id>.json`. The
+outbox file did not exist yet — the Files API returns 502 on a
+missing path (same behaviour as the LIST 502 on a nonexistent
+directory, L4). A 502 from `get` therefore says nothing about the
+task: Pi may still be working, or may already have written its
+deliverable without the outbox receipt landing yet. Do NOT retry
+`get` in a loop and do NOT conclude the task failed. Check the box
+directly over SSH instead: `ls /root/pi-bridge/outbox/` and `ls`
+the deliverable file, and fetch it with `scp` when the file matters
+more than the receipt.
+
+### L24. Judge a Pi task by its deliverable on the box, not by its receipt
+
+Pi wrote `/root/work/search-new.py` (34,727 bytes) at 09:12 UTC, but
+the outbox JSON for that task still was not there minutes later
+while `get` kept 502ing. The work was done; only the receipt was
+missing. When a task's deliverable is a file, check for the file
+first — the outbox result is a formality that can lag or fail
+independently.
+
+### L25. When the user owns the Worker, give them a paste-ready folder
+
+Pattern that worked on 2026-11-19 for the vault: one folder
+(`vault-your-worker/`) holding the whole program (`src/`,
+`public/`, `migrations/`, `package.json`, `wrangler.toml` with
+placeholders), a `00-START-HERE.md` with the exact steps, a
+`KEYS.md` saying which secret goes where, and the key files
+themselves (chmod 600). The user pastes from the folder into their
+own Worker; nothing is deployed for them and no key value ever
+appears in chat. Build the folder with the USER'S keys, not with
+keys generated for a throwaway deploy.
+
 ## Checklist to fold into SETUP-PROMPT.md §6 (Rules while you work)
 
 - Re-read SETUP-PROMPT.md and COMPLETE-SETUP.md in full before any
