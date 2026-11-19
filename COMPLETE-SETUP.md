@@ -1009,3 +1009,34 @@ The mechanics, so no future instance repeats the mistake:
   prompt the worker to retry, move on. Never present it as an owner blocker,
   never leave work parked on it. The standing supervisor job carries the same
   instruction, so the unlock happens even between conversations.
+
+## Lesson 25 — Pi has no auto reasoning mode; route difficulty at the driver (2026-11-19)
+
+- Pi's reasoning effort is a FIXED per-profile value (`samplingParams.reasoning_effort`
+  in models.json), sent identically on every call. A one-line file read thinks as
+  hard as a security design. Neither Pi 1.5.2 nor the gateway has a
+  difficulty-adaptive "auto" mode, and the model cannot scale itself — the
+  client picks the level. A max-effort agent step is a loop of dozens of these
+  calls, which is why steps take 10–30 minutes while a single consult takes
+  seconds.
+- Fix: driver-level routing. Register a TWIN provider for the same model with
+  `reasoning_effort: "high"` (same baseUrl, same `$ENV` key reference, same
+  context/output limits; here: provider `100milionseek-fast` next to
+  `100milionseek`). Whoever sends a step prompt classifies the step first:
+  mechanical steps (tests/checks, plan-mechanical edits, git/commit/push,
+  exact-instruction config edits) run on the fast profile; design,
+  security-sensitive code, unknown-cause debugging and reviews stay on max;
+  when unsure, use max.
+- Switching is mid-session, context preserved, via the gateway's generic RPC
+  passthrough: POST /rpc {"session_id": ..., "command": {"type": "set_model",
+  "provider": "<provider>", "modelId": "<model id>"}}. Verify with
+  {"type": "get_state"} — data.model.provider and data.model.samplingParams
+  show what is actually live.
+- WARNING: the gateway's dedicated POST /sessions/{id}/model route is BROKEN —
+  it nests the model inside a "model" field, while Pi's RPC wants top-level
+  provider + modelId, so every shape sent through that route fails with
+  "Model not found: undefined/undefined". Always switch via /rpc.
+- Verified live both directions 2026-11-19 (fast profile answers; switch to max
+  and back confirmed by get_state). The standing supervisor job carries the
+  classification rule as its step 5c and sets the model before every prompt it
+  sends.
