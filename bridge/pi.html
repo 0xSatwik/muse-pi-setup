@@ -220,7 +220,8 @@ kbd{font-family:inherit;font-size:10px;border:1px solid var(--bd);border-bottom-
 
 @media (max-width:820px){
   aside{position:fixed;left:0;top:0;bottom:0;width:86vw;max-width:330px;transform:translateX(-102%);
-    transition:transform .22s ease;box-shadow:0 0 40px rgba(0,0,0,.5);padding-top:6px}
+    transition:transform .22s ease;box-shadow:0 0 40px rgba(0,0,0,.5);padding-top:6px;z-index:30}
+  #scrim{z-index:25}
   aside.open{transform:none}
   #scrim.on{display:block}
   #menuBtn{display:inline-flex}
@@ -322,9 +323,10 @@ const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c =>
    Builders escape all dynamic values with esc(); md() escapes the whole source
    string before emitting its own tags. */
 const OK_TAGS = new Set(("DIV SPAN P B STRONG EM DEL CODE PRE A UL OL LI BR HR " +
-  "H2 H3 H4 H5 BLOCKQUOTE TABLE THEAD TBODY TR TH TD DETAILS SUMMARY").split(" "));
+  "H2 H3 H4 H5 BLOCKQUOTE TABLE THEAD TBODY TR TH TD DETAILS SUMMARY BUTTON OPTION OPTGROUP").split(" "));
 const OK_ATTR = new Set(["class", "href", "target", "rel", "title", "style",
-  "data-lang", "data-id", "colspan", "rowspan"]);
+  "data-lang", "data-id", "data-act", "data-q", "value", "selected", "label",
+  "colspan", "rowspan"]);
 const _parser = new DOMParser();
 function _clean(root) {
   [...root.querySelectorAll("*")].forEach(el => {
@@ -354,6 +356,7 @@ const PAGE = 100;              // transcript window: render this many messages a
 let shownCount = PAGE;         // how many of the tail are currently rendered
 let pollMs = 10000, busy = false, lastAgentEnd = 0;
 let statsFails = 0;
+let sessFails = 0;
 let sideSig = "";
 let stream = { text: "", thinking: "", tools: [], active: false };
 let modelCache = JSON.parse(localStorage.getItem("pi.modelCache") || "{}");
@@ -479,21 +482,27 @@ async function loadModels() {
   renderModelSel();
 }
 function renderModelSel() {
+  // Build with DOM APIs, NOT set(): the HTML parser drops <option> /
+  // <optgroup> tokens outside a <select>, so set() can never render them.
   const sel = $("modelSel");
   const want = CUR ? (modelCache[CUR] || PENDING_MODEL) : PENDING_MODEL;
-  let html = '<option value="">model…</option>';
-  let lastP = null;
+  sel.replaceChildren();
+  const ph = document.createElement("option");
+  ph.value = ""; ph.textContent = "model…";
+  sel.appendChild(ph);
+  let lastP = null, grp = null;
   MODELS.forEach(m => {
     if (m.provider !== lastP) {
-      if (lastP !== null) html += "</optgroup>";
-      html += '<optgroup label="' + esc(m.provider) + '">';
+      grp = document.createElement("optgroup");
+      grp.label = m.provider;
+      sel.appendChild(grp);
       lastP = m.provider;
     }
-    html += '<option value="' + esc(m.key) + '"' + (m.key === want ? " selected" : "") + ">" +
-            esc(m.id) + "</option>";
+    const o = document.createElement("option");
+    o.value = m.key; o.textContent = m.id;
+    if (m.key === want) o.selected = true;
+    grp.appendChild(o);
   });
-  if (lastP !== null) html += "</optgroup>";
-  set(sel, html);
 }
 
 /* ---------- sessions ---------- */
@@ -510,14 +519,26 @@ function ago(ts) {
 async function loadSessions(silent) {
   try {
     const list = await api("/sessions");
-    SESS = (list || []).slice();
+    // Pi keeps timestamped snapshot files next to the live session file
+    // (2026-11-19T09-14-30-020Z_<uuid> vs <uuid>): same chat, listed twice.
+    // Keep only the newest entry per base id.
+    const byBase = new Map();
+    (list || []).forEach(s => {
+      const base = String(s.id || "").replace(/^\d{4}-\d{2}-\d{2}T[\d-]+Z_/, "");
+      const prev = byBase.get(base);
+      if (!prev || (s.mtime || 0) > (prev.mtime || 0)) byBase.set(base, s);
+    });
+    SESS = [...byBase.values()];
     SESS.sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0) || (b.mtime || 0) - (a.mtime || 0));
     renderSessions();
+    sessFails = 0;
     const target = anyRunning() ? 2000 : 10000;
     if (target !== pollMs) { pollMs = target; clearInterval(evTimer); evTimer = setInterval(pollEvents, pollMs); }
     clearInterval(listTimer); listTimer = setInterval(loadSessions, pollMs);
   } catch (e) {
-    if (!silent && e.message !== "unauthorized") toast("Sessions: " + e.message);
+    if (e.message === "unauthorized") return;
+    sessFails++;
+    if (!silent && sessFails === 3) toast("Sessions: " + e.message);
   }
 }
 function renderSessions(force) {
@@ -823,7 +844,7 @@ function renderLog() {
   let html = "";
 
   if (start > 0) {
-    html += '<div class="olderbar"><button class="ghost" onclick="showOlder()">' +
+    html += '<div class="olderbar"><button class="ghost" data-act="older">' +
       "Show older messages (" + start + " more)</button></div>";
   }
   for (let i = start; i < total; i++) html += msgHtml(use[i], results);
@@ -1080,7 +1101,9 @@ $("sessList").addEventListener("click", e => {
 });
 $("logInner").addEventListener("click", e => {
   const chip = e.target.closest(".chip[data-q]");
-  if (chip) quick(chip.dataset.q);
+  if (chip) { quick(chip.dataset.q); return; }
+  const older = e.target.closest("[data-act='older']");
+  if (older) showOlder();
 });
 document.addEventListener("keydown", e => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
