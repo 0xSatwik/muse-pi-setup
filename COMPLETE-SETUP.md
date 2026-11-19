@@ -611,7 +611,15 @@ verifier + DEK) are already set. The flow is:
    `request_id`; grants last exactly 2 hours), the service +
    key_label pairs it may use, and the never-print rule for the
    master secret — in a connector doc / skill.
-5. Verify: MCP `initialize` with its own token → serverInfo
+5. **Muse is the one who unlocks — for Pi, for 2 hours at a time.**
+   Pi can call the vault but it can never unlock: it does not hold
+   the master secret. When Pi hits `unlock_required`, Muse unlocks
+   that exact service + key_label for Pi's agent_id (2-hour grant)
+   and tells Pi to retry. Re-unlocking is routine, not an error.
+   Never hand the master to Pi; never let Pi hold it. Pi's own
+   agent_id on the vault (e.g. `pi-altare`) is registered by Muse
+   with the master, exactly like its own agent_id in step 3.
+6. Verify: MCP `initialize` with its own token → serverInfo
    `cf-d1-vault`; `tools/list` OK; a locked call →
    `unlock_required`; one granted call → real response.
 
