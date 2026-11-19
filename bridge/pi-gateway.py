@@ -35,6 +35,8 @@ Endpoints (all except /health need Authorization: Bearer <token>):
   DELETE /secrets/{env_name}          remove a provider key
   GET  /settings                      current default provider/model
   POST /settings {defaultProvider, defaultModel}
+  GET  /fallback                      model fallback chain + last auto-switch
+  POST /fallback {enabled?, chain?}   update the fallback chain (admin page)
   GET  /monid                         whether the Monid search key is set
   POST /monid {key}                   store the Monid key (chmod 600)
   POST /provider-models {base_url, api_key? | env_name?}
@@ -93,6 +95,36 @@ if not TOKEN:
 
 LOGIN_FAILS = {}
 
+# ---- Model fallback (auto-switch) ----
+# Ordered chain of "provider/modelId". When a session's turn dies on a
+# provider error, the watchdog below switches that session to the next
+# model in the chain and prompts it to continue with full context.
+# Editable from the admin page; stored beside this file, not in Pi's
+# own settings.json.
+FALLBACK_FILE = os.path.join(BASE, "fallback.json")
+FALLBACK_DEFAULT = {"enabled": True,
+                    "chain": ["provider-a/model-1", "provider-b/model-2"]}
+LAST_SWITCH = {}
+
+
+def load_fallback():
+    try:
+        with open(FALLBACK_FILE) as f:
+            d = json.load(f)
+        chain = [c for c in d.get("chain", []) if isinstance(c, str) and "/" in c]
+        return {"enabled": bool(d.get("enabled", True)),
+                "chain": chain or list(FALLBACK_DEFAULT["chain"])}
+    except Exception:
+        return {"enabled": FALLBACK_DEFAULT["enabled"], "chain": list(FALLBACK_DEFAULT["chain"])}
+
+
+def save_fallback(cfg):
+    tmp = FALLBACK_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cfg, f, indent=2)
+    os.replace(tmp, FALLBACK_FILE)
+    return cfg
+
 # ---- RPC process management ----
 procs = {}          # session_id -> {"proc", "reader", "pending", "events", "lock", "cwd", "running"}
 procs_lock = threading.Lock()
@@ -103,6 +135,7 @@ def log_event(sid, rec):
     if p is None:
         return
     p["events"].append(rec)
+    p["last_event_at"] = time.time()
     if len(p["events"]) > 2000:
         p["events"] = p["events"][-2000:]
     try:
@@ -158,7 +191,8 @@ def spawn_rpc(sid, cwd, model=None):
     proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, bufsize=1, env=env)
     entry = {"proc": proc, "pending": {}, "events": [], "lock": threading.Lock(),
-             "cwd": cwd, "running": False, "sid": sid, "last_error": None}
+             "cwd": cwd, "running": False, "sid": sid, "last_error": None,
+             "last_event_at": 0, "fb_handled_at": None}
     procs[sid or "new"] = entry
     threading.Thread(target=reader_thread, args=(sid or "new",), daemon=True).start()
     return entry
@@ -187,6 +221,73 @@ def ensure_proc(sid, cwd=WORK, model=None):
         if sid in procs:
             del procs[sid]
     return spawn_rpc(sid, cwd, model)
+
+
+FB_ERROR_HINTS = ("503", "502", "500", "upstream", "busy", "overloaded",
+                  "unavailable", "timed out", "timeout", "econnreset",
+                  "fetch failed", "socket hang", "rate limit", "429")
+
+
+def _is_provider_error(err):
+    e = (err or "").lower()
+    return any(h in e for h in FB_ERROR_HINTS)
+
+
+def _current_model(entry):
+    st = rpc_call(entry, {"type": "get_state"}, timeout=30)
+    model = ((st or {}).get("data") or {}).get("model") or {}
+    prov = model.get("provider")
+    mid = model.get("id") or model.get("modelId")
+    return (prov + "/" + mid) if prov and mid else None
+
+
+def fallback_watchdog():
+    """When a session's turn has died on a provider error and stayed idle,
+    switch it to the next model in the fallback chain and continue it."""
+    while True:
+        time.sleep(15)
+        try:
+            cfg = load_fallback()
+            if not cfg["enabled"] or len(cfg["chain"]) < 2:
+                continue
+            now = time.time()
+            for sid, entry in list(procs.items()):
+                try:
+                    if entry["proc"].poll() is not None or entry.get("running"):
+                        continue
+                    le = entry.get("last_error")
+                    if not le or entry.get("fb_handled_at") == le.get("at"):
+                        continue
+                    if not _is_provider_error(le.get("error")):
+                        entry["fb_handled_at"] = le.get("at")
+                        continue
+                    # Let Pi's own retries settle first: the error and the
+                    # session's last event must both be at least 45s old.
+                    err_at = (le.get("at") or 0) / 1000.0
+                    if (err_at and now - err_at < 45) or now - (entry.get("last_event_at") or 0) < 45:
+                        continue
+                    cur = _current_model(entry)
+                    chain = cfg["chain"]
+                    if cur in chain:
+                        idx = chain.index(cur)
+                        nxt = chain[idx + 1] if idx + 1 < len(chain) else None
+                    else:
+                        nxt = chain[0] if chain[0] != cur else None
+                    entry["fb_handled_at"] = le.get("at")
+                    if not nxt:
+                        continue
+                    prov, mid = nxt.split("/", 1)
+                    rpc_call(entry, {"type": "set_model", "provider": prov, "modelId": mid}, timeout=30)
+                    if _current_model(entry) != nxt:
+                        continue
+                    LAST_SWITCH.clear()
+                    LAST_SWITCH.update({"session": sid, "from": cur, "to": nxt, "at": int(now)})
+                    rpc_call(entry, {"type": "prompt", "message":
+                                     "Continue from where you left off. (Auto-fallback: the previous model hit a provider error, so this session was switched to " + nxt + ". You have the full conversation context.)"}, timeout=30)
+                except Exception:
+                    continue
+        except Exception:
+            continue
 
 
 def session_files():
@@ -395,6 +496,14 @@ label.chk{display:flex;gap:7px;align-items:center;cursor:pointer}
 
 <div class="card"><h2>Models</h2><div id="models"></div></div>
 
+<div class="card"><h2>Model fallback order</h2>
+<div class="mut">When a session's model hits a provider error (busy, 5xx, timeout), the session auto-switches to the next model in this order and continues with the full context. Put the models in the order you want them tried. Only models whose provider has a key can actually work.</div>
+<div class="row"><label><input type="checkbox" id="fb_enabled" onchange="fbToggle()"> Auto-switch enabled</label></div>
+<div id="fb_list"></div>
+<div class="row"><select id="fb_add" class="grow"></select><button onclick="fbAdd()">Add to order</button></div>
+<div class="mut" id="fb_last"></div>
+</div>
+
 <div class="card"><h2>Add models — the proper way</h2>
 <div class="grid">
 <input id="am_provider" placeholder="provider name (e.g. openrouter)">
@@ -443,14 +552,35 @@ async function saveTok(){const v=$('tok').value.trim();if(!v)return;
   if(r.ok){const d=await r.json();TOK=d.token;sessionStorage.setItem('pigtok',TOK);loadAll();return}}catch(e){}
  TOK=v;sessionStorage.setItem('pigtok',TOK);loadAll()}
 async function loadAll(){try{
- const [models,secrets,settings,monid,health]=await Promise.all([api('/models'),api('/secrets'),api('/settings'),api('/monid'),api('/health')]);
+ const [models,secrets,settings,monid,health,fallback]=await Promise.all([api('/models'),api('/secrets'),api('/settings'),api('/monid'),api('/health'),api('/fallback')]);
  $('loginCard').style.display='none';$('app').style.display='block';
  $('health').textContent=health.ok?'running':'?';$('health').className='badge ok';
  $('deflt').textContent='Default: '+(settings.defaultProvider||'?')+'/'+(settings.defaultModel||'?');
- renderModels(models,settings);renderKeys(secrets.secrets||[],models);
+ renderModels(models,settings);renderKeys(secrets.secrets||[],models);renderFallback(fallback,models);
  $('monidBadge').textContent=monid.set?'set':'not set';$('monidBadge').className='badge '+(monid.set?'ok':'no');
 }catch(e){$('loginCard').style.display='block';$('app').style.display='none';if(TOK)toast(e.message)}}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+let FB={enabled:true,chain:[]};
+function renderFallback(fb,models){FB={enabled:!!fb.enabled,chain:(fb.chain||[]).slice()};
+ $('fb_enabled').checked=FB.enabled;
+ const el=$('fb_list');el.innerHTML='';
+ FB.chain.forEach((c,i)=>{const row=document.createElement('div');row.className='row';
+  row.innerHTML='<span class="grow">'+(i+1)+'. '+esc(c)+'</span>';
+  const up=document.createElement('button');up.className='ghost';up.textContent='↑';up.disabled=!i;up.onclick=()=>fbMove(i,-1);
+  const dn=document.createElement('button');dn.className='ghost';dn.textContent='↓';dn.disabled=i===FB.chain.length-1;dn.onclick=()=>fbMove(i,1);
+  const rm=document.createElement('button');rm.className='ghost';rm.textContent='✕';rm.onclick=()=>fbRemove(i);
+  row.append(up,dn,rm);el.append(row)});
+ const sel=$('fb_add');sel.innerHTML='';
+ const provs=(models&&models.providers)||{};
+ Object.keys(provs).forEach(p=>{(provs[p].models||[]).forEach(m=>{const v=p+'/'+m.id;
+  if(!FB.chain.includes(v)){const o=document.createElement('option');o.value=v;o.textContent=v;sel.append(o)}})});
+ const ls=fb.lastSwitch;
+ $('fb_last').textContent=ls?('Last auto-switch: '+(ls.from||'?')+' → '+ls.to+' · '+new Date(ls.at*1000).toLocaleTimeString()):'No auto-switch yet.'}
+async function fbSave(){try{await api('/fallback',{method:'POST',body:JSON.stringify({enabled:FB.enabled,chain:FB.chain})});toast('Fallback order saved')}catch(e){toast(e.message)}}
+async function fbMove(i,d){const j=i+d;if(j<0||j>=FB.chain.length)return;const t=FB.chain[i];FB.chain[i]=FB.chain[j];FB.chain[j]=t;await fbSave();loadAll()}
+async function fbRemove(i){FB.chain.splice(i,1);await fbSave();loadAll()}
+async function fbAdd(){const v=$('fb_add').value;if(!v)return;FB.chain.push(v);await fbSave();loadAll()}
+async function fbToggle(){FB.enabled=$('fb_enabled').checked;await fbSave();loadAll()}
 function fmtN(n){if(!n)return '?';return n>=1000?Math.round(n/1000)+'k':String(n)}
 function renderModels(data,settings){const el=$('models');el.innerHTML='';
  const provs=data.providers||{};
@@ -589,6 +719,10 @@ class H(BaseHTTPRequestHandler):
             s = load_settings()
             return self._json(200, {"defaultProvider": s.get("defaultProvider"),
                                     "defaultModel": s.get("defaultModel")})
+        if u.path == "/fallback":
+            cfg = load_fallback()
+            cfg["lastSwitch"] = dict(LAST_SWITCH) if LAST_SWITCH else None
+            return self._json(200, cfg)
         if u.path == "/monid":
             return self._json(200, monid_status())
         m = re.match(r"^/sessions/([^/]+)$", u.path)
@@ -656,6 +790,13 @@ class H(BaseHTTPRequestHandler):
             return self._json(401, {"error": "unauthorized"})
         u = urlparse(self.path)
         body = self._body()
+        if u.path == "/fallback":
+            cfg = load_fallback()
+            if isinstance(body.get("enabled"), bool):
+                cfg["enabled"] = body["enabled"]
+            if isinstance(body.get("chain"), list):
+                cfg["chain"] = [c for c in body["chain"] if isinstance(c, str) and "/" in c]
+            return self._json(200, save_fallback(cfg))
         if u.path == "/prompt":
             sid = body.get("session_id")
             cwd = body.get("cwd", WORK)
@@ -852,4 +993,5 @@ class H(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"pi-gateway listening on {HOST}:{PORT}", flush=True)
+    threading.Thread(target=fallback_watchdog, daemon=True).start()
     ThreadingHTTPServer((HOST, PORT), H).serve_forever()

@@ -10,8 +10,9 @@ Full policy: `~/workspace/altare-pi-setup/DELEGATION.md`.
 ## Hosts
 - **Altare sandbox:** Muse reaches Pi two ways — the gateway over
   Tailscale (primary) and this file-queue bridge over the Altare Files
-  API (fallback). Direct SSH from Muse's VM is blocked by its egress
-  proxy, so Muse doesn't SSH into the sandbox.
+  API (fallback). Direct SSH from Muse's VM also works, over the
+  tailnet tunnel — the sandbox runs Dropbear, because OpenSSH cannot
+  run there. See `docs/SSH-ACCESS.md`.
 - **Hoody computer:** Muse reaches Pi only through the gateway, over
   its public `https` `http-8765` URL. There is no Files API and no
   fallback bridge — this `muse-pi.py` does not apply there. The
@@ -29,6 +30,12 @@ Muse --Files API--> reads outbox, prints Pi's answer
 ## Files
 - `watcher.py` — runs ON the sandbox at /root/pi-bridge/watcher.py
 - `muse-pi.py` — runs HERE (Muse's VM), the tool Muse calls
+- `pi-gateway.py` — the gateway itself: sessions, models, keys, the admin
+  page, and the model fallback auto-switch (`docs/FALLBACK.md`)
+- `fallback.json.example` — copy to `fallback.json` beside the gateway
+  and order your own provider/model ids
+- `ts-connect.py` + `pi-ssh.sh` — SSH from Muse's VM into the sandbox
+  over the tailnet tunnel (`docs/SSH-ACCESS.md`)
 
 ## Start the watcher (once, after a sandbox restart too — no systemd)
 In the sandbox web console / SSH:
