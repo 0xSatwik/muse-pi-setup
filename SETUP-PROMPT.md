@@ -463,6 +463,21 @@ Every one of these cost real time:
   start a fresh session for that topic.
 - One Pi session per topic; reuse, compact when long, fresh start only
   if a session dies or gets confused.
+- A key NAME is not a key VALUE. Before picking a model for a task,
+  check the VALUE LENGTH of its key in `/root/pi-bridge/provider-keys.env`
+  (never print the value) — a name with an empty value fails with
+  "No API key found". If a value is empty, the real value goes in
+  through the Admin page, then restart the gateway — never mid-task.
+- A long Pi session can die on a transient model error (mid-stream
+  failure). The gateway retries a failed turn itself (up to 3 attempts);
+  queued "continue" messages do NOT resume a dead session — a stopped
+  session needs a fresh resume prompt. Never report a stopped session
+  as complete.
+- When a Pi session must push to GitHub, set the push path up FIRST:
+  add the origin remote, use branch `main` (not `master`), unlock the
+  vault GitHub key before the first push, and verify the first push
+  landed on GitHub before continuing. A clone with no remote cannot
+  push, and local commits alone are not delivered.
 - When you are done, tell me the gateway URL (Altare: the tailnet IP;
   Hoody: the `http-8765` URL), the gateway health result, and the
   model list — and nothing else I did not ask for.
