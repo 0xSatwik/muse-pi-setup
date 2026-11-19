@@ -185,7 +185,14 @@ def ensure_proc(sid, cwd=WORK, model=None):
     return spawn_rpc(sid, cwd, model)
 
 
+_sess_cache = {"ts": 0.0, "data": None}
+SESS_CACHE_TTL = 30.0  # /pi polls /sessions every 2-10s; don't re-scan every file each time
+
+
 def session_files():
+    now = time.time()
+    if _sess_cache["data"] is not None and now - _sess_cache["ts"] < SESS_CACHE_TTL:
+        return _sess_cache["data"]
     out = []
     seen = set()
     # live gateway sessions first (RPC processes) — Pi may not have
@@ -208,26 +215,38 @@ def session_files():
                 if sid in seen:
                     continue
                 seen.add(sid)
-                name, cwd, n = sid, "", 0
+                name, cwd, model, n = sid, "", "", 0
                 try:
                     with open(path) as f:
                         for line in f:
                             n += 1
+                            # Only the session header + model_change lines
+                            # carry list data; parsing every message/tool
+                            # line made a full scan take ~8s over 71 files.
+                            if ('"type":"session"' not in line
+                                    and '"type": "session"' not in line
+                                    and '"model_change"' not in line):
+                                continue
                             try:
                                 rec = json.loads(line)
                             except Exception:
                                 continue
-                            if isinstance(rec, dict):
-                                if rec.get("type") == "session" and rec.get("name"):
+                            if not isinstance(rec, dict):
+                                continue
+                            if rec.get("type") == "session":
+                                if rec.get("name"):
                                     name = rec["name"]
                                 if rec.get("cwd"):
                                     cwd = rec["cwd"]
+                            elif rec.get("type") == "model_change" and rec.get("modelId"):
+                                model = (rec.get("provider") + "/" if rec.get("provider") else "") + rec["modelId"]
                 except Exception:
                     pass
-                out.append({"id": sid, "name": name, "cwd": cwd, "messages": n,
+                out.append({"id": sid, "name": name, "cwd": cwd, "model": model, "messages": n,
                             "mtime": os.path.getmtime(path),
                             "running": sid in procs and procs[sid]["proc"].poll() is None and procs[sid]["running"]})
     out.sort(key=lambda s: s.get("mtime", 0), reverse=True)
+    _sess_cache["ts"], _sess_cache["data"] = now, out
     return out
 
 
@@ -1064,4 +1083,10 @@ if __name__ == "__main__":
     _seed_cpu()
     _seed_workspace()
     print(f"pi-gateway listening on {HOST}:{PORT}", flush=True)
-    ThreadingHTTPServer((HOST, PORT), H).serve_forever()
+    # The /pi page polls /sessions + /stats + /events concurrently; the
+    # default listen backlog of 5 drops connections under that load and
+    # cloudflared reports them as 502s.
+    class Srv(ThreadingHTTPServer):
+        request_queue_size = 128
+        daemon_threads = True
+    Srv((HOST, PORT), H).serve_forever()
