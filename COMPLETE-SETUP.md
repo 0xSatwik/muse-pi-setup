@@ -1318,3 +1318,51 @@ The mechanics, so no future instance repeats the mistake:
   and back confirmed by get_state). The standing supervisor job carries the
   classification rule as its step 5c and sets the model before every prompt it
   sends.
+
+## Lesson 26 — A key NAME is not a key VALUE: an empty value fails silently (2026-11-19)
+
+- `xingchi/gpt-6.1-sol` failed with "No API key found for xingchi"
+  because `XINGCHI_API_KEY` was empty in
+  `/root/pi-bridge/provider-keys.env` — same for TOKENLAB, MOSS,
+  HOWTOFIX (all length 0); only HMS had a value (47 chars). The
+  models.json registration was correct, and the gateway passes all 5
+  key NAMES to Pi's environment. A name in the Admin page proves
+  nothing; the value is what runs.
+- Rule: when a model reports "no API key", check the VALUE LENGTH in
+  provider-keys.env (never print the value), not the registration.
+  The fix is entering the real value via the Admin page, then
+  restarting the gateway to load it — never mid-task. After any key
+  change, sync the exports into `/root/.profile` / `/root/.bashrc`
+  and restart the gateway AND the watcher (the Admin page writes
+  provider-keys.env only).
+
+## Lesson 27 — A long Pi session dies on a transient model error; the retry belongs in the gateway (2026-11-19)
+
+- A mid-stream model failure (`{"error": "The model failed
+  mid-stream."}`) stopped the QwenPaw Pi session at ~19:45 IST while
+  it was working; the 12 queued "continue" messages did NOT
+  auto-resume it (they had been consumed as steering while it ran).
+- Fix: a gateway retry. On a `message_end` with `stopReason ==
+  "error"`, the gateway re-sends the same prompt up to 3 times
+  (backoff 10s/30s/60s), retrying only mid-stream / upstream /
+  rate-limit / timeout errors — never auth / key / context errors.
+  Deployed in `pi-gateway.py` (tested against a fake `pi`), activates
+  on the next gateway restart. Interim: a watchdog script + 10-min
+  cron that resumes the session only on a retryable error.
+- Rule: a long task needs a retry at the runner level; queued
+  steering messages are not a resume mechanism. Never report a
+  stopped session as complete.
+
+## Lesson 28 — A Pi clone with no remote and the wrong branch cannot push (2026-11-19)
+
+- Pi cloned the QwenPaw repo on the box, committed A1–A4 locally (6
+  commits), but nothing reached GitHub: the clone had NO remote (`git
+  remote -v` empty) and was on branch `master` while the repo uses
+  `main`. `git fetch origin` fails with an access error and
+  `origin/main..HEAD` is an unknown revision.
+- Rule: when a Pi session is meant to push, the brief must say — add
+  the origin remote, use branch `main`, unlock the vault GitHub key
+  before the first push — and verify the first push landed on GitHub
+  before continuing. Verify the key belongs to the right account
+  (GET /user) before pushing; two GitHub accounts in one setup is a
+  real mix-up risk. Local commits alone are not delivered.
