@@ -447,6 +447,71 @@ tells Pi to retry. Never hand the master to Pi; never let Pi hold
 it. (Owner instruction 2026-11-19: "you will be the one who
 unblock ... you will unblock for 2 hours thats how it works".)
 
+### L30. A key NAME in the Admin page is not a key VALUE — an empty value fails silently
+
+The Pi Admin page saves whatever is entered; if the value field is
+left empty, the name exists but the value is length 0. `xingchi/
+gpt-6.1-sol` failed with "No API key found for xingchi" because
+`XINGCHI_API_KEY` was empty in `/root/pi-bridge/provider-keys.env`
+— same for TOKENLAB, MOSS, HOWTOFIX (all length 0); only HMS had a
+value (47 chars). The models.json registration was correct, and the
+gateway passes all 5 key NAMES to Pi's environment. Rule: when a
+model reports "no API key", check the VALUE LENGTH in
+provider-keys.env (never print the value), not the registration.
+The fix is entering the real value via the Admin page, then
+restarting the gateway to load it — never mid-task. (2026-11-19,
+QwenPaw session.)
+
+### L31. A long Pi session dies on a transient model error — build the retry into the gateway, not the prompt
+
+A mid-stream model failure (`{"error": "The model failed
+mid-stream."}`) stopped the QwenPaw Pi session at ~19:45 IST while
+it was working; the 12 queued "continue" messages did NOT
+auto-resume it (they had been consumed as steering while it ran).
+The fix is a gateway retry: on a `message_end` with `stopReason ==
+"error"`, re-send the same prompt up to 3 times (backoff
+10s/30s/60s), retrying only mid-stream / upstream / rate-limit /
+timeout errors — never auth / key / context errors. Deployed in
+`pi-gateway.py` (tested against a fake `pi`), activates on the next
+gateway restart. Interim: a watchdog script + 10-min cron that
+resumes the session only on a retryable error. Rule: a long task
+needs a retry at the runner level; queued steering messages are not
+a resume mechanism. (2026-11-19.)
+
+### L32. Don't infer a runtime cap from a log gap — read the machine record
+
+The QwenPaw container logged 0 lines 17:21–19:21 IST and that was
+read as "the machine went down at 17:21, the run is capped at 4h".
+Wrong: the live InstaBox machine record showed `maxRunMinutes: 480`
+(8h) and `runStartedAt` 13:21:15 IST — the machine never went down,
+the container was just idle and quiet. Rule: before telling the
+user a wall time or a cap, read the machine record
+(`maxRunMinutes`, `runStartedAt`) — a quiet log is idle, not a
+pause. (2026-11-19.)
+
+### L33. A Pi clone with no remote and the wrong branch cannot push — set the push path up front
+
+Pi cloned the QwenPaw repo on the box, committed A1–A4 locally (6
+commits), but nothing reached GitHub: the clone had NO remote (`git
+remote -v` empty) and was on branch `master` while the repo uses
+`main`. `git fetch origin` fails with an access error and
+`origin/main..HEAD` is an unknown revision. Rule: when a Pi session
+is meant to push, the brief must say — add the origin remote, use
+branch `main`, unlock the vault GitHub key before the first push —
+and verify the first push landed on GitHub before continuing.
+(2026-11-19.)
+
+### L34. The guard can fire and the sleep can still fail — check the sleep result, not just the fire
+
+The 7h guard fired ~21:06 IST (uptimeSec past 25200) but the sleep
+attempt failed (`pages_sleep_failed`) and the state flipped back to
+"running" — the machine stayed up and headed for the 8h wall
+~21:21 IST. A guard firing is not a guard sleep. Rule: after a
+guard fire, read `/sleepwake/state` for `lastSleepAt` +
+`machineStatus` and confirm the machine actually went down; a
+`sleep_failed` reason needs the Pages sleep path investigated, not
+another fire. (2026-11-19.)
+
 ## Checklist to fold into SETUP-PROMPT.md §6 (Rules while you work)
 
 - Re-read SETUP-PROMPT.md and COMPLETE-SETUP.md in full before any
