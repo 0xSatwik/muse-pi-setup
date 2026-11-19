@@ -5,12 +5,19 @@ Muse and Pi ALWAYS use this system. No other search/fetch path.
 ## Stack (in order, combined — maximum URLs + data)
 1. **TinyFish free search** via Monid API — `tinyfish /free/search`
    ($0, 12,000/day, 30/min). Primary web search.
-2. **DuckDuckGo Lite** — no key, fallback + extra URLs.
-   Flaky under rapid repeats; space out calls.
-3. **TinyFish free fetch** via Monid — `tinyfish /free/fetch`
+2. **cf-search Worker (Bing)** — no key, free. Second web leg (added
+   2026-11-19). `https://cf-search.akamithun-search.workers.dev/search`
+   (override with `CF_SEARCH_URL`). Plain text, one line per result.
+   Country-wise filtering works; pagination does NOT work for web/news.
+   Google News and DuckDuckGo do NOT work from Cloudflare's network.
+   Full docs: `docs/SEARCH-WORKER.md`.
+3. **DuckDuckGo Lite** — no key, fallback + extra URLs.
+   Flaky under rapid repeats; space out calls. Works from a normal VM
+   but NOT from Cloudflare's network (202 bot-challenge).
+4. **TinyFish free fetch** via Monid — `tinyfish /free/fetch`
    ($0, 1,000 URLs/day, 150/min). Primary page fetch, clean Markdown.
    Fallback: plain curl.
-4. **X / social via FxEmbed** — no key, UA mandatory.
+5. **X / social via FxEmbed** — no key, UA mandatory.
    Base `https://fixtweet.twapiworker.workers.dev`
    (clone `fixtweet-2.twapiworker.workers.dev`).
    X search: `/ai/2/ask?q=&pages=N` (max 8). Also Bluesky, TikTok,
@@ -26,6 +33,7 @@ Muse and Pi ALWAYS use this system. No other search/fetch path.
 ```
 python3 web.py research "question" --pages 2 --fetch-top 5   # DEFAULT, combined
 python3 web.py search "query" [--purpose "..."]
+python3 web.py search-cf "query" [--vertical web|images|videos|news] [--count 10] [--cc IN] [--setlang en-IN] [--time week]
 python3 web.py fetch <url> [url...]
 python3 web.py search-ddg "query"
 python3 web.py xsearch "query" [--pages 3]
@@ -43,6 +51,7 @@ python3 web.py xtrends
 
 ## Rules
 - Always `research` for a research question — one combined call.
-- Merge + dedupe URLs from TinyFish, DuckDuckGo and X; fetch top 5-10.
+- Merge + dedupe URLs from TinyFish, cf-search Worker, DuckDuckGo and X; fetch top 5-10.
 - Never use paid `/search` / `/fetch` (non-free) Monid endpoints.
+- Bing pagination does not work — do not call `page=2` expecting new results.
 - Cite every source URL.
