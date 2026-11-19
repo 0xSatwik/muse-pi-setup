@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""web.py — fast search/fetch: TinyFish free via Monid + cf-search Worker (Bing) + DuckDuckGo.
+"""web.py — fast search/fetch: TinyFish free via Monid + cf-search Worker (Bing) + X.
 
 Order (fastest / cheapest first):
   search: 1) TinyFish /free/search via Monid API ($0, 30/min, 500/hr)
           2) cf-search Worker — Bing web/images/videos/news, no key, free
              (https://cf-search.akamithun-search.workers.dev, plain text)
-          3) DuckDuckGo Lite (https://lite.duckduckgo.com/lite/?q=...) — no key
   fetch:  1) TinyFish /free/fetch via Monid API ($0, 150 URLs/min, 1000/day)
           2) plain curl (browser UA)
+
+DuckDuckGo was REMOVED 2026-11-19 — it returns nothing from the Pi
+sandbox (bot-challenge, []) and from Cloudflare's network (HTTP 202).
+It only works from a normal VM. Do not add it back.
 
 Monid key: read from Monid's own credential store
 ~/.config/monid/credentials.yaml (label "main", chmod 600) or
@@ -33,9 +36,10 @@ X / social (FxEmbed, no key, UA mandatory):
   /ai/2/status/{id} /thread/{id} /profile/{handle} /profile/{handle}/statuses
   /ai/2/post?url=<any X/Bsky/TikTok/IG/Threads/Mastodon post or profile URL>
   500 during a walk = retry same cursor after ~30s; 404 = exhausted.
+  Full manual: https://fixtweet.twapiworker.workers.dev/llms.txt
 
 Combined research (maximum URLs + data):
-  research = TinyFish search + cf-search Worker + DuckDuckGo search (dedup URLs)
+  research = TinyFish search + cf-search Worker (dedup URLs)
              + X search (/ai/2/ask) + TinyFish fetch of top URLs.
   Always use `research` for any real research question — never just
   one source. See ~/workspace/custom-skills/web-research/SKILL.md.
@@ -44,7 +48,6 @@ Usage:
   python3 web.py search "Pi coding agent" [--purpose "..."]
   python3 web.py search-cf "query" [--vertical web] [--count 10] [--cc IN] [--setlang en-IN]
   python3 web.py fetch https://example.com [https://...]
-  python3 web.py search-ddg "query"   # DuckDuckGo only
   python3 web.py xsearch "Pi coding agent" [--pages 3]
   python3 web.py xpost https://x.com/jack/status/20
   python3 web.py xprofile <handle>
@@ -146,20 +149,6 @@ def cfsearch_search(query, vertical="web", count=10, setlang=None, cc=None, time
     return out
 
 
-def ddg_search(query, n=8):
-    url = "https://lite.duckduckgo.com/lite/?q=" + urllib.parse.quote(query)
-    r = subprocess.run(["curl", "-s", "-m", "20", "-A", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36", url],
-                       capture_output=True, text=True)
-    html = r.stdout
-    # <a rel="nofollow" href="//duckduckgo.com/l/?uddg=<urlencoded>&amp;rut=..." class='result-link'>Title
-    pairs = re.findall(r"href=\"//duckduckgo\.com/l/\?uddg=([^&\"']+)[^>]*class='result-link'>([^<]+)", html)
-    out = []
-    for enc, title in pairs[:n]:
-        real = urllib.parse.unquote(enc)
-        out.append({"title": title.strip(), "url": real})
-    return out
-
-
 def curl_fetch(url):
     r = subprocess.run(["curl", "-s", "-m", "30", "-A", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36", url],
                        capture_output=True, text=True)
@@ -226,7 +215,7 @@ def x_trends():
 
 
 def combined_search(query, purpose=None):
-    """Web (TinyFish + cf-search Worker + DDG, deduped) + X. Returns dict of all sources."""
+    """Web (TinyFish + cf-search Worker, deduped) + X. Returns dict of all sources."""
     urls, seen = [], set()
     tf = tinyfish_search(query, purpose) or []
     for r in tf:
@@ -238,10 +227,6 @@ def combined_search(query, purpose=None):
         u = r.get("url")
         if u and u not in seen:
             seen.add(u); urls.append({"title": r.get("title"), "url": u, "source": "cf-search"})
-    for r in ddg_search(query):
-        u = r.get("url")
-        if u and u not in seen:
-            seen.add(u); urls.append({"title": r.get("title"), "url": u, "source": "duckduckgo"})
     return {"web": urls, "tinyfish_count": len(tf), "cfsearch_count": len(cf)}
 
 
@@ -272,7 +257,6 @@ def main():
     c.add_argument("--count", type=int, default=10)
     c.add_argument("--setlang"); c.add_argument("--cc"); c.add_argument("--time")
     f = sub.add_parser("fetch"); f.add_argument("urls", nargs="+")
-    d = sub.add_parser("search-ddg"); d.add_argument("query")
     x = sub.add_parser("xsearch"); x.add_argument("query"); x.add_argument("--pages", type=int, default=2)
     xp = sub.add_parser("xpost"); xp.add_argument("url_or_id")
     xpr = sub.add_parser("xprofile"); xpr.add_argument("handle")
@@ -285,16 +269,11 @@ def main():
             print(json.dumps(res, indent=2)); return
         print("[tinyfish] no result, falling back to cf-search Worker", file=sys.stderr)
         res = cfsearch_search(args.query)
-        if res:
-            print(json.dumps(res, indent=2)); return
-        print("[cf-search] no result, falling back to DuckDuckGo", file=sys.stderr)
-        print(json.dumps(ddg_search(args.query), indent=2))
+        print(json.dumps(res or [], indent=2))
     elif args.cmd == "search-cf":
         res = cfsearch_search(args.query, vertical=args.vertical, count=args.count,
                               setlang=args.setlang, cc=args.cc, time_range=args.time)
         print(json.dumps(res or [], indent=2))
-    elif args.cmd == "search-ddg":
-        print(json.dumps(ddg_search(args.query), indent=2))
     elif args.cmd == "fetch":
         res = tinyfish_fetch(args.urls)
         if res:
