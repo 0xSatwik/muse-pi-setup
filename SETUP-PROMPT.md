@@ -22,7 +22,13 @@ do not work around it silently.
 Ask them all in one message, then wait for my answers. **Skip any
 question I have already answered** (for example in the message that
 brought you this prompt) — say what you assumed instead of asking
-again:
+again. **Never ask whether a sandbox exists — call
+`GET /tenants/<team>/servers` first; an empty list is the answer.**
+Prove the team token with `GET /api-tokens/self` before asking
+anything about it. If two sources disagree on a name or id, stop and
+say so in one line — do not carry both silently. When the user
+repeats a guide rule back to you, confirm it and move on — do not
+re-explain the rule as if it were new.
 
 1. **Host — Altare or Hoody?** Pick one. The Pi side is the same on
    both; only how I reach it changes.
@@ -31,14 +37,20 @@ again:
      have an Altare account? (Free tier, no card.) If you have not
      created the sandbox yet, I cannot create it for you — team API
      tokens cannot create sandboxes (403 `TOKEN_ROUTE_NOT_ALLOWED` by
-     design). Create it in the Altare web console via **Apps →
-     Create app → Software → Sandboxes** (Ubuntu 24.04, the full free
-     pool — 6 GiB RAM, 150% CPU, 10 GiB disk; add your SSH public key
-     to the team first, under Team → Settings → SSH keys). **Link
-     your Discord account (Account → Discord) before pressing Start —
-     Start refuses until Discord is linked**; after linking, Start
-     may queue ("waiting for room on the node"), which is normal.
-     Then give me the **team ID** and **server ID**
+     design). **The API key NEVER creates anything. It only reads
+     files on a sandbox that already exists.** Create it in the Altare
+     web console via **Apps → Create app → Software → Sandboxes** —
+     copy-pasteable spec, name FIRST:
+     `name: pi, Ubuntu 24.04, whole free pool (6 GiB RAM, 150% CPU,
+     10 GiB disk), SSH keys only, region = pre-selected default`.
+     Add your SSH public key to the team first, under Team → Settings
+     → SSH keys. **Check Account → Discord first: if it already says
+     "Linked", there is no gate. Only if it is unlinked must you link
+     it** (Account → Discord) before pressing Start — Start refuses
+     until Discord is linked; after linking, Start may queue
+     ("waiting for room on the node"), which is normal. Free-tier
+     Start takes ~25–30 minutes end to end — that is normal, not a
+     failure. Then give me the **team ID** and **server ID**
      (console → server details; the server ID is the UUID in the
      server URL).
    - **Hoody computer** (2 cores, 3 GB RAM, 20 GB disk free; Docker
@@ -65,12 +77,11 @@ again:
    You can add more later with `pi-api.py add-model`. Any
    OpenAI-compatible provider works.
 4. **Search (optional):** Do you have a Monid key for free search?
-   Without it, web search still works through the DuckDuckGo fallback
-   but the TinyFish path is off. If you have one, paste it. (Know
-   this: the DuckDuckGo fallback returns `[]` from datacenter IPs —
-   verified from both the Muse VM and the sandbox — so without a
-   Monid key, search on the box returns nothing. The Monid leg is
-   the load-bearing one.)
+   Without it, in-server search returns nothing — DuckDuckGo was
+   removed 2026-11-19 (it returns `[]` from datacenter IPs, verified
+   from both the Muse VM and the sandbox) and there is no fallback
+   engine left. The Monid leg is load-bearing: no Monid key means no
+   search results, silently. If you have one, paste it.
 5. **Secrets vault (optional):** Do you also want the Cloudflare
    Worker + D1 secrets vault so Pi can call GitHub and other APIs
    without ever seeing the key? It is a separate repo
@@ -107,7 +118,12 @@ use the default and tell me what you assumed.
   `PI_GATEWAY_TOKEN=<token>` (chmod 600). Never print it in chat
   beyond the one time you show it to me, never put it in the repo.
   Note: `setup-muse.sh` prints the token once at the end — treat
-  the script's whole output as secret.
+  the script's whole output as secret. **Never hand-transcribe a
+  generated secret from tool output** — a value mis-copied by one
+  character fails for the user and for your own tests alike. Verify
+  a generated secret by hash before giving it to anyone; for the
+  Admin opening password, author the value yourself (stdin, never
+  output) — a word passphrase is the human-copyable form.
 - **Model keys:** box only — `/root/pi-bridge/provider-keys.env`
   (chmod 600, `KEY=value` lines) AND `export KEY='value'` lines in
   `/root/.profile` and `/root/.bashrc`. The gateway reads
@@ -142,20 +158,29 @@ use the default and tell me what you assumed.
 
 ## 3. Browser steps (the only steps that need a browser)
 
-Do these in the browser, in this order. Everything else is scripts.
+**The API key NEVER creates anything. It only reads files on a
+sandbox that already exists. Every creation step happens in the
+browser.** Do these in the browser, in this order. Everything else is scripts.
 
 **If Altare:**
 
 1. **Altare console:** log in — **yourself**: Muse opens the page
    but must never ask for, receive, or type your password/code;
    once you are signed in, Muse can work in the same session.
-   Link your Discord account (Account → Discord → Link) — only you
-   can, and Start refuses without it. Then create the sandbox (see
-   question 1) and open the web console terminal for it. The console
-   sometimes shows the server as "Offline" when it is alive — trust
-   the terminal, not the badge. Direct SSH from my VM is blocked by
-   its egress proxy, so do not try SSH; use the web console and the
-   Files API.
+   Check Account → Discord first — if it already says "Linked",
+   there is no gate. Only if it is unlinked, link it (only you
+   can, and Start refuses without it). Then create the sandbox
+   (copy-pasteable spec, name FIRST: `name: pi, Ubuntu 24.04, whole
+   free pool, SSH keys only, region = pre-selected default`) and
+   open the web console terminal for it. The console sometimes shows
+   the server as "Offline" when it is alive — trust the terminal,
+   not the badge. Direct SSH from my VM is blocked by default by
+   its egress proxy — try it (host/port from the console's server
+   details); if it works, use it; if not, use the web console and
+   the Files API. SSH reads known_hosts from the passwd home
+   (`/root/.ssh/` for uid 0), not `$HOME` — `/root` is ephemeral
+   across VM replacements, so after a replacement re-add the
+   keyscan key there.
 2. **Tailscale approvals (three of them, all by the user):**
    a. My VM joins the tailnet as device `muse` and prints an approval
       link — only the user can approve it. The same approval is also
@@ -190,24 +215,38 @@ public (no login). Monid signup is a website if you need a key.
 
 2. In the Altare web console terminal (as root), run:
    `bash /root/work/setup/setup-sandbox.sh`
-   It installs Node 22 + Pi 1.5.2 + Tailscale, places the bundle,
+   Before running it, verify the Pi install line in the script with
+   grep — it must say `@earendil-works/pi-coding-agent@1.5.2`
+   (the unscoped `pi@1.5.2` can never work); do not assume the patch
+   is in. It installs Node 22 + Pi 1.5.2 + Tailscale, places the bundle,
    starts everything in tmux, and prints the sandbox tailnet IP. When
    it prints a Tailscale login URL, open it and approve the device.
    (It runs apt noninteractively — no tzdata prompt — and it also
    installs Pi's search tool at `/root/pi-bridge/search.py` plus a
-   Monid credentials template on the box.)
+   Monid credentials template on the box.) If it fails once on apt,
+   re-run the exact same script once before diagnosing — a transient
+   apt failure is not a broken script.
 3. Take the tailnet IP it printed and re-run:
    `./setup-muse.sh --tailnet <ip>`
    That writes `tailnet-url.txt` and runs the health check.
 4. Verify (all must pass):
    - `pi-api.py health` → `{"ok": true}`
    - `pi-api.py models` → all six models (or however many you added)
-   - `pi-api.py prompt "Say OK" --model xingchi/gpt-6.1-sol` → `OK`
+   - `pi-api.py prompt "Say OK" --model xingchi/gpt-6.1-sol` → the
+     call returns `{"disposition": "started", "session_id": ...}` —
+     that is the async reply, NOT the answer. Read it back with
+     `pi-api.py status <id>`; the OK is in `last_assistant_text`.
    - `muse-pi.py ask --model moss/nex-n2.6 --prompt "Say OK"` → `OK`
-     (this is the fallback path — if it works, the bridge works)
+     (this is the fallback path — if it works, the bridge works.
+     If it says "No API key found", the key is missing from
+     `/root/.profile` — the Admin page writes
+     `provider-keys.env` only; sync the exports and restart the
+     watcher.)
    - `python3 search/web.py research "pi agent"` → web results
    If a check fails, stop and tell me the exact failure and the fix.
-   Do not declare the setup done until every check passes.
+   Do not declare the setup done until every check passes. If the
+   gateway path times out right after a key was added, restart the
+   gateway first — it has not picked the key up yet; it is not down.
 
 **If Hoody, continue here instead:**
 
@@ -229,12 +268,17 @@ public (no login). Monid signup is a website if you need a key.
 4. Verify (all must pass):
    - `pi-api.py health` → `{"ok": true}`
    - `pi-api.py models` → all six models (or however many you added)
-   - `pi-api.py prompt "Say OK" --model xingchi/gpt-6.1-sol` → `OK`
+   - `pi-api.py prompt "Say OK" --model xingchi/gpt-6.1-sol` → the
+     call returns `{"disposition": "started", "session_id": ...}` —
+     that is the async reply, NOT the answer. Read it back with
+     `pi-api.py status <id>`; the OK is in `last_assistant_text`.
    - `python3 search/web.py research "pi agent"` → web results
    There is no `muse-pi.py` check on Hoody — Hoody has no Files API,
    so the gateway URL is the only path.
    If a check fails, stop and tell me the exact failure and the fix.
-   Do not declare the setup done until every check passes.
+   Do not declare the setup done until every check passes. If the
+   gateway path times out right after a key was added, restart the
+   gateway first — it has not picked the key up yet; it is not down.
 
 **Both hosts — finish in the Pi Admin page:**
 
@@ -244,7 +288,13 @@ public (no login). Monid signup is a website if you need a key.
    password's SHA-256 in the box's `gateway.env`
    (`PI_ADMIN_PASS_SHA256`) and restart the gateway, then log in and
    add any remaining provider keys + the Monid key **there** —
-   write-only, never shown back. Set the default model in the page
+   write-only, never shown back. Author the opening password
+   yourself (stdin, never output) and verify it by hash BEFORE
+   giving it to the user — never hand-transcribe a generated secret.
+   5 failed logins lock the page for 10 minutes; a gateway restart
+   clears the counter. Tunnel login POSTs can be flaky under node
+   load — retry twice before concluding anything is broken, and
+   count the retries against the lockout. Set the default model in the page
    (or `defaultProvider`/`defaultModel` in `settings.json`; this
    setup defaults to `100milionseek/deepseek-v4.1-flash-free` with
    its max profile — contextWindow 197488, maxTokens 65536,
@@ -258,9 +308,12 @@ public (no login). Monid signup is a website if you need a key.
    `/mcp` endpoint; `"exposure": "codemode"`), and verify: MCP
    `tools/list` answers, and a call with no grant open returns
    `unlock_required` — that locked answer is the success state. If
-   the user has their own Worker, use the existing-Worker path
-   instead (§10.2b): package the files for their Worker, do not
-   deploy a fresh one.
+   the vault already exists at a known URL, use it — do NOT redeploy
+   it and do NOT make fresh keys (§10.1a): this Muse is owner-equal,
+   registers its OWN agent_id + token on that vault, and unlocks for
+   itself. If the user has their own Worker but no vault yet, use the
+   existing-Worker path instead (§10.2b): package the files for
+   their Worker, do not deploy a fresh one.
 7. **Install the four Pi packages** (full detail + problems log in
    `PACKAGES.md` — read it first): upgrade the box to Node 24
    (context-mode needs ≥ 24.15; use the `.tar.gz` archive — the box has
@@ -365,6 +418,18 @@ Every one of these cost real time:
 
 ## 6. Rules while you work
 
+- Before you send any browser task or run any host step, re-read
+  SETUP-PROMPT.md and COMPLETE-SETUP.md in full in this session. A
+  summary from an earlier turn is not a read.
+- The API key never creates anything. Browser first, key second.
+- Sandbox name `pi` is part of the creation instruction, not a
+  correction afterwards.
+- `GET /tenants/<team>/servers` before asking whether a sandbox exists.
+- `tunnels` list + `zones` list before creating any tunnel or record.
+- Never touch a tunnel you did not create.
+- If two sources disagree on a name or id, say so at once.
+- When a step fails, stop, report the exact error and the fix. Do not
+  work around it silently.
 - Report real progress; do not go silent during long steps. If a step
   takes more than a few minutes, say where it is.
 - Verify before trusting: a check counts only when its command
@@ -375,6 +440,23 @@ Every one of these cost real time:
   first — not console rituals, and never through chat.
 - Never commit a secret to the repo. The repo's `.gitignore` blocks
   the secret files; keep it that way.
+- Never hand-transcribe a generated secret from tool output. Verify
+  by hash before giving it to anyone.
+- `muse-pi.py get` dying with an Altare API 502 means the outbox
+  result file does not exist yet — the task may still be running, or
+  its deliverable may already be on the box. Do not loop `get` and
+  do not call the task failed: check the box over SSH
+  (`ls /root/pi-bridge/outbox/`, `ls` the deliverable) and fetch it
+  with `scp`. Judge a Pi task by its deliverable on the box, not by
+  its receipt.
+- `muse-pi.py put` prepends `/root/work/` to the remote path — pass
+  paths relative to it, never absolute `/root/work/...` paths.
+- Restart the gateway after ANY key change, and restart the watcher
+  too — the Admin page writes `provider-keys.env` only, and the
+  watcher reads `/root/.profile`. Both stores must have the keys.
+- Install `DELEGATION.md` as the `pi-delegation` skill, so the
+  ask/send/get + gateway-session flow is the default for long and
+  heavy work.
 - Prefer xingchi/gpt-6.1-sol for long Pi work. moss dies empty on long
   sessions. If Pi returns empty twice on a task, have it write results
   to a file and read the file — and if a session goes empty twice,
