@@ -59,10 +59,25 @@ Models:
 - 100milionseek/deepseek-v4.1-flash-free
 
 Only a model whose key is actually on the box can run — check
-`/root/pi-bridge/provider-keys.env` (names only, never values)
-before picking a model. Keys live in two stores: the gateway reads
+`/root/pi-bridge/provider-keys.env` before picking a model. A key
+NAME is not a key VALUE: check the VALUE LENGTH (never print the
+value) — a name with an empty value fails with "No API key found".
+Keys live in two stores: the gateway reads
 `provider-keys.env`, the watcher reads `/root/.profile` — after any
 key change, sync both and restart the gateway AND the watcher.
+
+Pushing to GitHub: when a Pi session must push, set the push path up
+FIRST — add the origin remote, use branch `main` (not `master`),
+unlock the vault GitHub key before the first push — and verify the
+first push landed on GitHub before continuing. A clone with no remote
+cannot push; local commits alone are not delivered. Verify the key
+belongs to the right account (GET /user) before pushing.
+
+A long session can die on a transient model error (mid-stream
+failure). The gateway retries a failed turn itself (up to 3
+attempts); queued "continue" messages do NOT resume a dead session —
+send a fresh resume prompt instead. Never report a stopped session
+as complete.
 
 Notes:
 - Watcher runs in tmux `pi-bridge` on the sandbox; restart it after
