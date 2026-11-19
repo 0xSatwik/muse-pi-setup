@@ -75,11 +75,17 @@ again:
    Worker + D1 secrets vault so Pi can call GitHub and other APIs
    without ever seeing the key? It is a separate repo
    (`0xSatwik/cf-d1-vault`) with its own guide — say yes and I will do
-   it after this setup, or no and we skip it. If yes: **check first
-   whether a vault is already deployed** (you may have made one,
-   possibly in a different Cloudflare account) before creating
-   anything — a duplicate D1 in the wrong account is the known
-   mistake.
+   it after this setup, or no and we skip it. If yes, ask FIRST, before
+   creating anything: **which Cloudflare account holds your Worker,
+   what is the Worker's name/URL, and where do the master password,
+   the DEK and Pi's token come from — yours from an existing setup, or
+   generate fresh?** Check whether a vault is already deployed (you
+   may have made one, possibly in a different Cloudflare account) —
+   a duplicate D1 in the wrong account is the known mistake, and a D1
+   cannot be bound to a Worker in a different account. If you already
+   have a Worker and keys, I will NOT deploy a fresh vault — I will
+   build you a paste-ready folder with the vault files, steps and your
+   key files for your Worker instead.
 6. **Sandbox device name (Altare only):** What should the sandbox be
    called on your tailnet? Default is `pi-altare`. Skip this if you
    picked Hoody.
@@ -239,13 +245,17 @@ public (no login). Monid signup is a website if you need a key.
    its max profile — contextWindow 197488, maxTokens 65536,
    reasoning on, vision on, `samplingParams`
    `{"reasoning_effort": "max"}`).
-6. **If I said yes to the vault (question 5):** wire Pi to it —
-   register agent `pi` with the vault master (only the token's
+6. **If I said yes to the vault (question 5):** only after the
+   account, Worker and key source are confirmed (§10.1) — wire Pi to
+   it: register agent `pi` with the vault master (only the token's
    SHA-256 is stored), put Pi's raw request-only token only in
    `/root/.pi/agent/mcp.json` on the box (chmod 600; the vault's
    `/mcp` endpoint; `"exposure": "codemode"`), and verify: MCP
    `tools/list` answers, and a call with no grant open returns
-   `unlock_required` — that locked answer is the success state.
+   `unlock_required` — that locked answer is the success state. If
+   the user has their own Worker, use the existing-Worker path
+   instead (§10.2b): package the files for their Worker, do not
+   deploy a fresh one.
 7. **Install the four Pi packages** (full detail + problems log in
    `PACKAGES.md` — read it first): upgrade the box to Node 24
    (context-mode needs ≥ 24.15; use the `.tar.gz` archive — the box has
