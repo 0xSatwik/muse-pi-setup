@@ -550,10 +550,10 @@ in `skills/web-research/`:
 
 - **Tool:** `search/web.py` — TinyFish free search+fetch via a Monid
   key (`$0`; search 12k/day, fetch 1k/day) + cf-search Worker (Bing, no
-  key, free) + DuckDuckGo Lite fallback + X/social via FxEmbed
+  key, free) + X/social via FxEmbed
   (descriptive User-Agent mandatory).
 - **Default command:** `python3 search/web.py research "query"` —
-  web results from three engines (deduped) + an X ask pack + fetch of
+  web results from two engines (deduped) + an X ask pack + fetch of
   the top 5 URLs. If it times out on the X leg, `search` (web-only)
   is the fallback.
 - **cf-search Worker (Bing):** `https://cf-search.akamithun-search.workers.dev/search`
@@ -573,9 +573,10 @@ in `skills/web-research/`:
   surrogate** value: the VM's egress swaps it for the real key on
   calls to Monid's API, so no raw key sits in a file there. The box
   always needs the real key, pasted on the box.
-- **DuckDuckGo alone returns nothing.** Verified from both the Muse
+- **DuckDuckGo was removed (2026-11-19).** Verified from both the Muse
   VM and sandbox egresses: the DDG Lite fallback answers `[]` from
-  datacenter IPs. The Monid/TinyFish leg is load-bearing — without
+  datacenter IPs, and from Cloudflare's network it returns a 202
+  bot-challenge. The Monid/TinyFish leg is load-bearing — without
   a Monid key, in-server search returns nothing, silently.
 - **Cloudflare-blocked sites:** when a site 403s every direct request
   (even no-auth, even the site root), the egress is blocked, not the
@@ -798,7 +799,7 @@ pi/
   provider-keys.env.example
   pi-sessions.template.json
 search/
-  web.py             free search/fetch (TinyFish + DuckDuckGo + X)
+  web.py             free search/fetch (TinyFish + Bing + X)
   SEARCH.md          search system notes
 skills/
   web-research/SKILL.md   the research skill (Muse + Pi)
