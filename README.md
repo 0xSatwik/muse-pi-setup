@@ -59,9 +59,14 @@ this is THE way to manage keys and models after setup, not console
 rituals:
 
 - **Altare (tailnet):** `http://<sandbox-tailnet-ip>:8765/admin`
-- **Altare (fallback):** the cloudflared quick-tunnel URL from
+- **Altare (named tunnel, permanent):** `https://<name>.<your-domain>/admin`
+  — set up once, stays the same forever. Full guide: `docs/TUNNEL.md`.
+  The DNS record for the tunnel hostname MUST be proxied (orange cloud);
+  DNS-only gives `ERR_CONNECTION_RESET`.
+- **Altare (quick tunnel, fallback):** the cloudflared quick-tunnel URL from
   `/root/pi-bridge/tunnel.log` on the box, + `/admin`. The URL rotates
-  whenever the tunnel restarts — always read the current one there.
+  whenever the tunnel restarts — always read the current one there. Use
+  only until the named tunnel is set up.
 - **Hoody:** your `http-8765` gateway URL + `/admin`.
 
 **Login:** an opening password whose **SHA-256 hash** lives in the
@@ -544,12 +549,19 @@ a key written literally in a file. See `search/SEARCH.md` and the skill
 in `skills/web-research/`:
 
 - **Tool:** `search/web.py` — TinyFish free search+fetch via a Monid
-  key (`$0`; search 12k/day, fetch 1k/day) + DuckDuckGo Lite fallback
-  + X/social via FxEmbed (descriptive User-Agent mandatory).
+  key (`$0`; search 12k/day, fetch 1k/day) + cf-search Worker (Bing, no
+  key, free) + DuckDuckGo Lite fallback + X/social via FxEmbed
+  (descriptive User-Agent mandatory).
 - **Default command:** `python3 search/web.py research "query"` —
-  web results from both engines (deduped) + an X ask pack + fetch of
+  web results from three engines (deduped) + an X ask pack + fetch of
   the top 5 URLs. If it times out on the X leg, `search` (web-only)
   is the fallback.
+- **cf-search Worker (Bing):** `https://cf-search.akamithun-search.workers.dev/search`
+  — plain text, one line per result. Set `CF_SEARCH_URL` to your own
+  Worker URL if you deploy one (guide: `docs/SEARCH-WORKER.md`).
+  Country-wise filtering works (setlang+cc); pagination does NOT work
+  for web/news (Bing ignores `first=` in every form tested); Google
+  News and DuckDuckGo do NOT work from Cloudflare's network. Bing only.
 - **Monid key:** only in `~/.config/monid/credentials.yaml`
   (chmod 600, format `key: "<value>"`) — on the Muse VM **and in
   the same file on the box** (`/root/.config/monid/credentials.yaml`;
