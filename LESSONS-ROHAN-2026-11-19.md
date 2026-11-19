@@ -431,6 +431,22 @@ granted vault call fails with ZodError, check the file size FIRST
 before suspecting the grant, the key, or the token — and never
 prove the granted-call path with a big README.
 
+### L29. Muse is the one who unlocks — for Pi, for 2 hours at a time
+
+Pi can call the vault but it can never unlock: it does not hold the
+master secret. When Pi hits `unlock_required`, Muse (owner-equal,
+holding the master) unlocks that exact service + key_label for Pi's
+agent_id, and the grant lasts exactly 2 hours. Re-unlocking is
+routine, not an error. Proved live 2026-11-19: Pi (agent
+`pi-altare`, wired to the real vault) called github_read_file →
+`unlock_required`; Muse unlocked `github` / `gogibeta github` for
+`pi-altare` (grant eadd3092, 2h); Pi's next call returned the file's
+first line, "MIT License". Rule: the assistant never reports "Pi
+needs an unlock" as a blocker for the user — it unlocks itself and
+tells Pi to retry. Never hand the master to Pi; never let Pi hold
+it. (Owner instruction 2026-11-19: "you will be the one who
+unblock ... you will unblock for 2 hours thats how it works".)
+
 ## Checklist to fold into SETUP-PROMPT.md §6 (Rules while you work)
 
 - Re-read SETUP-PROMPT.md and COMPLETE-SETUP.md in full before any
