@@ -417,6 +417,20 @@ the token generated for the WRONG (fresh QwenPaw) vault — it must
 NOT be registered on the real vault. The real vault gets a fresh
 agent_id + token made with the real master secret.
 
+### L28. The vault caps GitHub file reads at 32 KB — a bigger file fails as an opaque ZodError
+
+`github_read_file` validates the GitHub response with
+`size: z.number().max(32768)` (cf-d1-vault `src/github.ts`). Reading
+a file over 32,768 bytes — e.g. the muse-pi-setup README.md at
+47,658 bytes — returns `{"error":"operation_failed","kind":
+"ZodError"}` even with a valid grant open. The unlock, the grant,
+the key and the token are all fine; the FILE is too big. Proved
+live 2026-11-19: the same grant, same key label, same repo read
+LICENSE (1,083 bytes) and returned real content. Rule: when a
+granted vault call fails with ZodError, check the file size FIRST
+before suspecting the grant, the key, or the token — and never
+prove the granted-call path with a big README.
+
 ## Checklist to fold into SETUP-PROMPT.md §6 (Rules while you work)
 
 - Re-read SETUP-PROMPT.md and COMPLETE-SETUP.md in full before any
