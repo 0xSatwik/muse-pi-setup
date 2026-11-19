@@ -82,10 +82,15 @@ again:
    generate fresh?** Check whether a vault is already deployed (you
    may have made one, possibly in a different Cloudflare account) —
    a duplicate D1 in the wrong account is the known mistake, and a D1
-   cannot be bound to a Worker in a different account. If you already
-   have a Worker and keys, I will NOT deploy a fresh vault — I will
-   build you a paste-ready folder with the vault files, steps and your
-   key files for your Worker instead.
+   cannot be bound to a Worker in a different account. **If the vault
+   already exists at a known URL, use it — do NOT redeploy it and do
+   NOT make fresh keys.** The owner gives the master secret from his
+   main account (pasted by him, never through chat); this Muse is
+   owner-equal, registers its OWN agent_id + token on that vault, and
+   unlocks for itself (§10.1a). If you already have a Worker but no
+   vault yet, I will build you a paste-ready folder with the vault
+   files, steps and your key files for your Worker instead of
+   deploying a fresh one.
 6. **Sandbox device name (Altare only):** What should the sandbox be
    called on your tailnet? Default is `pi-altare`. Skip this if you
    picked Hoody.
