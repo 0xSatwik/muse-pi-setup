@@ -120,8 +120,9 @@ def _read_stream(proc, try_no):
     dur = time.time() - t0
     content = "".join(content_parts)
     reasoning = "".join(reasoning_parts)
-    stats = (f"dur={dur:.0f}s curl_rc={proc.returncode} first_byte="
-             f"{first_byte:.0f}s chunks={chunks} reasoning_chars={len(reasoning)} "
+    fb = f"{first_byte:.0f}" if first_byte is not None else "-"
+    stats = (f"dur={dur:.0f}s curl_rc={proc.returncode} first_byte={fb}s "
+             f"chunks={chunks} reasoning_chars={len(reasoning)} "
              f"content_chars={len(content)} finish={finish}")
     if not content:
         if reasoning:
