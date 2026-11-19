@@ -939,3 +939,45 @@ restart is safe).
 `dur=7s first_byte=5s finish=stop`; settings re-downloaded from the
 box after writing (values byte-identical); the capped review re-run
 through v2 either completes or its log now states exactly how it died.
+
+
+## Lesson 23 — A max-reasoning review can think forever and never answer; chunk it, and run long jobs behind a resumable wrapper + a cron supervisor (2026-11-19)
+
+The PR #84 final review (126 KB prompt, reasoning_effort=max) failed across five
+full runs and one 45 KB chunk before the pattern was proven from seek.sh v2's
+per-attempt logs:
+
+- The streams were NOT dying of silence. One chunk attempt streamed 23.6 min /
+  59K chunks and produced 818,583 chars of reasoning and ZERO content, ending
+  finish=length; another produced 250K reasoning chars and a spurious
+  finish=tool_calls with no content. The model spends the entire budget
+  thinking — it got stuck re-deriving one question (whether files import a
+  symbol the diff hunk didn't show) — and the answer never starts.
+- The output cap does NOT save you: the gateway does not bind reasoning to
+  max_tokens the way you would expect (818K chars of reasoning sailed past a
+  32000 cap). The owner-set 32000 review cap stays, but the binding fix is
+  SCOPE, not the cap.
+- What works: (1) split the review into scoped chunks (e.g. RLS core vs call
+  sites) with an explicit scope note — "points whose evidence is in the other
+  part = not established in this part"; (2) add a reviewer-discipline addendum:
+  "CI is green and the code compiles — if a hunk doesn't show an import, it
+  already exists; do not re-derive it. Be decisive per point; write each
+  section as you finish it."; (3) keep every dead attempt's reasoning trace
+  (.reasoning.partial-<n>) — it is real analysis and evidence even when the
+  verdict never lands.
+- seek.sh bug found by its own diagnostics: when a stream died before the
+  first byte, first_byte stayed None and the stats line crashed ("unsupported
+  format string passed to NoneType.__format__"), burning an attempt with a
+  misleading error. Stats formatting is now None-safe; the seek.sh in this
+  repo carries the fix.
+- Muse's own runtime restarts (frequent deployments) kill background exec
+  sessions silently — twice in one hour — and detached setsid/nohup jobs get
+  reaped too. Durable pattern for long local jobs: a small IDEMPOTENT wrapper
+  script (skips steps whose outputs already exist, assembles the final
+  artifact) + a scheduled supervisor job that checks liveness and relaunches
+  THE WRAPPER. The wrapper alone dies; the cron alone has nothing resumable
+  to relaunch; together they self-heal.
+- Driving pattern (owner-confirmed): all build work happens in Pi; every step
+  prompt opens "Continue from where you left off", one step per prompt; the
+  finish of a step triggers verification + the next prompt — by the supervisor
+  on its 30-min pass or immediately — never left idle waiting to be reminded.
