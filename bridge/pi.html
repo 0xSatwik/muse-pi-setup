@@ -341,7 +341,7 @@ const set = (el, html) => {
   const doc = _parser.parseFromString("<body>" + html + "</body>", "text/html");
   _clean(doc.body);
   const frag = document.createDocumentFragment();
-  while (doc.body.firstChild) frag.appendChild(document.importNode(doc.body.firstChild, true));
+  while (doc.body.firstChild) frag.appendChild(doc.body.firstChild); // move (adopt), NOT importNode: importNode clones and the loop never ends
   el.replaceChildren(frag);
 };
 const shortId = id => String(id || "").replace(/^.*_/, "").slice(0, 8);
