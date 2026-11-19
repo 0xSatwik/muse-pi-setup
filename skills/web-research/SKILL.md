@@ -53,12 +53,15 @@ python3 web.py fetch https://example.com [https://...]   # up to 10 URLs
 
 ### cf-search Worker (Bing, no key) — second leg
 
-- `GET /search?q=...` at `https://cf-search.akamithun-search.workers.dev`
-  (override with `CF_SEARCH_URL`). Plain text, one line per result:
-  `N. Title - URL`. No JSON, no format parameter. Health: `GET /health`
-  returns `ok cf-search web images videos news`.
-- Full docs: `~/workspace/cf-search-worker/llms.txt` and `llm.txt`
-  (also `docs/SEARCH-WORKER.md` in the muse-pi-setup repo).
+- `GET /search?q=...` at YOUR Worker URL (see below). Plain text, one
+  line per result: `N. Title - URL`. No JSON, no format parameter.
+  Health: `GET /health` returns `ok cf-search web images videos news`.
+- **The Worker URL is NEVER hardcoded.** It is the user's own Worker,
+  deployed from `docs/SEARCH-WORKER.md`. **Muse ASKS the user for
+  their Worker URL during setup** and sets `CF_SEARCH_URL` (env export).
+  If it is empty, the cf-search leg is skipped and TinyFish + X still work.
+- Full manual: `search/cf-search-llms.txt` in this repo (also live at
+  `<your-worker-url>/llms.txt` once deployed).
 
 **Filters (all Bing filters):**
 
@@ -131,7 +134,8 @@ Base: `https://fixtweet.twapiworker.workers.dev`
 (clone: `https://fixtweet-2.twapiworker.workers.dev` — fail over on flake)
 **User-Agent header is MANDATORY** on every `/api` and `/ai` call
 (e.g. `Muse/1.0`); missing UA = HTTP 401. Full manual (229 lines):
-`https://fixtweet.twapiworker.workers.dev/llms.txt`
+`search/fxembed-llms.txt` in this repo (also live at
+`https://fixtweet.twapiworker.workers.dev/llms.txt`).
 
 Networks: X/Twitter, Bluesky, TikTok, Instagram, Threads, any
 Mastodon/ActivityPub instance. NOT supported: Reddit, Facebook,
