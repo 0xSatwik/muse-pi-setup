@@ -528,8 +528,19 @@ async function unlock(v){
     const r = await fetch("/admin-login", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password: v }) });
     if (r.ok) { const d = await r.json(); TOK = d.token; sessionStorage.setItem("zsgtok", TOK); return loadAll(); }
-  } catch(e){}
-  TOK = v; sessionStorage.setItem("zsgtok", TOK); loadAll();
+    // Login failed: show the real reason instead of silently retrying with
+    // the raw password as a token (that just loops back to this login).
+    let msg = "Wrong password — try again, or log in with the gateway token.";
+    try { const d = await r.json(); if (d && d.error) msg = d.error; } catch(e){}
+    if (r.status === 429) msg = "Too many attempts — wait a few minutes, then try again.";
+    if (r.status === 400) msg = "No opening password is set — log in with the gateway token.";
+    toast(msg, 6000);
+    const err = $("pwgate_err"); if (err) err.textContent = msg;
+    return;
+  } catch(e){
+    toast("Could not reach the gateway — check the connection and try again.", 6000);
+    return;
+  }
 }
 function showLogin(){
   const lc = $("loginCard");
@@ -545,6 +556,7 @@ function showLogin(){
       '<label style="font-size:11px;color:#8a8a8a;font-family:ui-monospace,monospace;display:block;margin-bottom:5px">Opening password</label>' +
       '<input id="pwgate_in" type="password" placeholder="password or gateway token" autocomplete="current-password" style="width:100%;background:#0d0d0d;border:1px solid #262626;border-radius:4px;color:#e8e8e8;padding:6px 9px;font:13px ui-monospace,monospace;outline:none">' +
       '<button id="pwgate_btn" style="margin-top:10px;width:100%;background:#4c8dff;color:#000;border:1px solid #4c8dff;border-radius:4px;padding:6px;font:600 13px system-ui;cursor:pointer">Unlock</button>' +
+      '<div id="pwgate_err" style="margin-top:10px;min-height:16px;color:#ff6b6b;font-size:12px"></div>' +
       '<div style="font-size:11px;color:#5f5f5f;margin-top:10px;line-height:1.5">Your opening password, or the gateway token.</div></div>';
     document.body.appendChild(d);
     $("pwgate_btn").onclick = async () => {
