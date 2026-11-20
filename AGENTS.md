@@ -61,9 +61,16 @@ It starts empty and is meant to grow slowly. Don't pad it; a short, accurate fil
 ## Zerostack — live at /pi, Pi is the fallback (2026-11-20)
 - Zerostack 1.8.6 is the agent now; Pi stays installed and the tunnel
   port is the switch (8766 Zerostack, 8765 Pi). Gateway files:
-  `bridge/zs-gateway.py`, `bridge/zs.html` (pi.html + switcher),
-  `bridge/zs-supervise.sh`; config template
+  `bridge/zs-gateway-rs/` (Rust, **live since 2026-11-21**, 9 MB),
+  `bridge/zs-gateway.py` (Python backup), `bridge/zs.html` (pi.html +
+  switcher), `bridge/zs-supervise.sh` (runs Rust when the binary
+  exists, Python otherwise); config template
   `zerostack/config.toml.example`. Full guide: `docs/ZEROSTACK.md`.
+  Build the Rust gateway with `cargo build --release` in
+  `bridge/zs-gateway-rs/` and copy the binary to
+  `/root/pi-bridge/zs-gateway`. Restarting the supervisor tmux
+  session re-reads `zs-supervise.sh` — editing the file alone does
+  not change the running loop.
 - **ACP has only three methods** (`initialize`, `session/new`,
   `session/prompt`) — no cancel, load, list, resume, or set_model.
   Sessions die with the process; the gateway owns transcripts and
