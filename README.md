@@ -1,20 +1,43 @@
 # muse-pi-setup
 
-MIT-licensed setup for **Muse controlling Pi on a free box** — the
+MIT-licensed setup for **Muse controlling Zerostack on a free box** — the
 whole system, with all the code, so a friend can hand this repo to their
 Muse and have it set up for them the same way. Two hosts are supported,
-pick one: an **Altare sandbox** or a **Hoody computer**. The Pi side is
-the same on both; only how Muse reaches it changes.
+pick one: an **Altare sandbox** or a **Hoody computer**.
 
-Muse is the planner and the one that talks to you. Pi (open source,
-MIT, `pi.dev`) is the second agent that runs on the free box and does
-the long, heavy work on your own model APIs — so it costs your API
-credits, not Muse tokens. On Altare, Muse reaches Pi through an HTTP
-gateway over Tailscale (primary) and a file-queue bridge over the
-Altare Files API (fallback). On Hoody, Muse reaches the same gateway
-directly over HTTPS through the Hoody proxy — no Tailscale, no tunnel,
-no fallback bridge. Pi never sees your keys for other services — for
-that, see the companion vault below.
+> **2026-11-21: Pi was fully removed.** Zerostack (Rust, 1.8.6) is the
+> only agent now. Pi is not installed, not a fallback, and there is no
+> Pi/Zerostack switcher. The repo name is historical. Everything below
+> describes the Zerostack setup; the Pi sections are history.
+
+Muse is the planner and the one that talks to you. Zerostack (open
+source, GPL-3.0, `gi-dellav/zerostack`) is the second agent that runs on
+the free box and does the long, heavy work on your own model APIs — so
+it costs your API credits, not Muse tokens. On Altare, Muse reaches
+Zerostack through an HTTP gateway (Rust, on the box) over Tailscale
+(primary) and a file-queue bridge (fallback). Zerostack never sees your
+keys for other services — for that, see the companion vault below.
+
+## Install — one command, then a short checklist
+
+On a fresh Altare sandbox (Ubuntu 24.04) as root:
+
+```
+curl -fsSL https://raw.githubusercontent.com/0xSatwik/muse-pi-setup/main/install.sh -o install.sh
+bash install.sh
+```
+
+`install.sh` automates the mechanical part (system packages, Node 24,
+Rust, cloudflared, Zerostack binary, the Rust gateway built from
+source, the chat/admin/settings pages, the config with placeholders,
+the recall system, and the tmux supervisor sessions). It prints a
+manual checklist at the end for the parts that need YOUR accounts —
+provider API keys, the vault Worker + D1, the Cloudflare Tunnel +
+domain, the opening password, and the Instabox browser. Those can
+never come from GitHub.
+
+Full step-by-step guide for another Muse: [`INSTALL.md`](INSTALL.md).
+It lists every step, what it does, and what to check after each one.
 
 ## What changed — 2026-11-20: `/pi`, a full chat UI in the browser
 
