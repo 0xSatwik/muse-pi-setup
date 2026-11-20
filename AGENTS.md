@@ -58,12 +58,17 @@ It starts empty and is meant to grow slowly. Don't pad it; a short, accurate fil
 - Search is the combined system ONLY (TinyFish free endpoints via Monid + cf-search Worker + X via FxEmbed) — never paid Monid endpoints. DuckDuckGo was removed 2026-11-19 (returns nothing from Pi/Cloudflare). The Monid leg is load-bearing: no Monid key on a side means no search results on that side.
 - Hallmark (`nutlope/hallmark`) is the default design skill on both sides — Muse: `~/.agents/skills/hallmark` (+ `~/workspace/custom-skills/hallmark`); Pi: `/root/.pi/agent/skills/hallmark`. The `npx skills add` route fails in this environment; install by cloning `nutlope/hallmark` and copying its `skills/hallmark/` folder (see COMPLETE-SETUP.md §9).
 
-## Zerostack — live at /pi, Pi is the fallback (2026-11-20)
-- Zerostack 1.8.6 is the agent now; Pi stays installed and the tunnel
-  port is the switch (8766 Zerostack, 8765 Pi). Gateway files:
-  `bridge/zs-gateway-rs/` (Rust, **live since 2026-11-21**, 9 MB),
-  `bridge/zs-gateway.py` (Python backup), `bridge/zs.html` (pi.html +
-  switcher), `bridge/zs-supervise.sh` (runs Rust when the binary
+## Zerostack — the ONLY agent (Pi REMOVED 2026-11-21)
+- Zerostack 1.8.6 is the agent. **Pi was fully removed from the server
+  on 2026-11-21 (user order) and is NOT a fallback.** There is no Pi
+  gateway, no pi.html, no Pi sessions, no /root/.pi, and no Pi/Zerostack
+  switcher — POST /switch rejects "pi". The tunnel serves only the
+  Zerostack gateway on 8766. Do NOT reinstall Pi or re-add a switcher.
+  (A backup of the removed Pi files lives only on the author's Muse VM,
+  not on the server, in case the user changes their mind.)
+- Gateway files: `bridge/zs-gateway-rs/` (Rust, **live since 2026-11-21**,
+  9 MB), `bridge/zs-gateway.py` (Python backup), `bridge/zs.html` (the
+  chat page), `bridge/zs-supervise.sh` (runs Rust when the binary
   exists, Python otherwise); config template
   `zerostack/config.toml.example`. Full guide: `docs/ZEROSTACK.md`.
   Build the Rust gateway with `cargo build --release` in
@@ -71,6 +76,10 @@ It starts empty and is meant to grow slowly. Don't pad it; a short, accurate fil
   `/root/pi-bridge/zs-gateway`. Restarting the supervisor tmux
   session re-reads `zs-supervise.sh` — editing the file alone does
   not change the running loop.
+- **One-command install:** `install.sh` (top level) automates the
+  mechanical setup on a fresh Altare sandbox; `INSTALL.md` is the
+  step-by-step guide for another Muse (including the manual secret
+  steps that can never come from GitHub).
 - **ACP has only three methods** (`initialize`, `session/new`,
   `session/prompt`) — no cancel, load, list, resume, or set_model.
   Sessions die with the process; the gateway owns transcripts and
