@@ -138,7 +138,7 @@ table.grid tr.def td{background:#0c0f14}
 .fbrow .n{font-family:var(--mono);font-size:11px;color:var(--mut2);width:18px}
 .fbrow .id{font-family:var(--mono);font-size:12px;flex:1;min-width:0;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
-.switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;font-size:12.5px}
+.field label.switch, .switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;font-size:12.5px}
 .switch input{display:none}
 .switch .t{width:34px;height:18px;border-radius:10px;background:#222;border:1px solid var(--line2);
   position:relative;transition:background .12s,border-color .12s;flex:0 0 auto}
@@ -233,8 +233,7 @@ table.grid tr.def td{background:#0c0f14}
             <p class="hint" style="margin-top:0">The list IS the order. <b style="color:var(--fg)">#1 is the default</b> — every chat uses it first. If it fails and fallback is on, the gateway tries #2, then #3, and so on. Use ↑ Up / ↓ Down to reorder.</p>
             <div class="field tight" style="align-items:center;gap:18px">
               <label class="switch" title="When off, only the default model is used">
-                <input type="checkbox" id="fbToggle" onchange="toggleFallback()"><span class="t"></span>
-                Fallback on failure
+                <input type="checkbox" id="fbToggle" onchange="toggleFallback()"><span class="t"></span><span>Fallback on failure</span>
               </label>
               <span class="hint" style="margin:0">off = only the default · on = try the next model in order</span>
             </div>
