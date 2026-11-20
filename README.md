@@ -101,6 +101,48 @@ from the environment and skips that leg when unset); both `llms.txt`
 files are checked in; and the `pi_delegation` skill documents how
 Muse hands long work to Pi.
 
+## What changed — 2026-11-20: Zerostack is live at `/pi`
+
+Zerostack (`gi-dellav/zerostack`, Rust, GPL-3.0) is now the agent on
+the box, behind the same `/pi` address, the same login, and the same
+look. Pi is not deleted — it stays installed as the fallback, and
+rollback is one tunnel port change (8766 → 8765). Full detail:
+[`docs/ZEROSTACK.md`](docs/ZEROSTACK.md).
+
+Why switch: one light binary (~16 MB RAM) with sessions, memory,
+subagents, and hooks built in, and Responses API support — the
+`xingchi` models that are broken in Pi should have worked here.
+What it cost: Zerostack is terminal-only, so the web layer was
+rebuilt once against its ACP interface. New files:
+`bridge/zs-gateway.py` (stdlib HTTP gateway, port 8766),
+`bridge/zs.html` (the `/pi` page plus a Pi | Zerostack switcher),
+`bridge/zs-supervise.sh` (respawn loop), and a config template at
+`zerostack/config.toml.example` (all six custom models, vault MCP,
+Exa off — environment variables only, no keys, no real Worker URLs).
+
+Three things the build found, verified live and worth knowing before
+you rely on it:
+
+- **Vault tools do not work through the gateway.** Zerostack
+  disables MCP in ACP mode, so the `/pi` Zerostack side cannot call
+  the vault; the terminal can (locked call returns
+  `unlock_required` until Muse unlocks, exactly as designed).
+- **xingchi does not work here either** — 403 `client_not_allowed`.
+  The provider only admits named coding clients, so the Responses
+  API fix does not help.
+- **Sessions die with their process.** ACP has only three methods
+  (`initialize`, `session/new`, `session/prompt`) — no cancel, load,
+  resume, or model switch — so the gateway owns transcripts and
+  replays a text digest after a respawn.
+
+Search is ours only: `enable-exa-mcp = false` plus the Exa lines in
+the bundled prompts replaced with one `web.py research` instruction.
+Context7 and Grep.app stay exactly as upstream ships them — the
+search swap is the only removal in the whole build. The Instabox
+browser setup is still pending (it needs the machine's details), and
+the private repo with the full bundle (search workers, all skills,
+INSTALL.md/FEATURES.md) is separate from this public repo.
+
 ## Start here — one prompt, two scripts
 
 **If you are a friend who got this repo:** paste
