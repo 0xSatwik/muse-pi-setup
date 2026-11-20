@@ -31,8 +31,6 @@ Endpoints (all except /health need Authorization: Bearer <token>):
        models.json keeps only the $ENV_NAME placeholder)
   POST /secrets {env_name, api_key}   store a provider API key (chmod 600)
   GET  /admin                         single-page admin UI (keys & models)
-  GET  /pi                            single-page chat UI (Pi Chat)
-  GET  /stats                         live sandbox CPU / RAM / disk usage
   GET  /secrets                       env names + set/unset (never values)
   DELETE /secrets/{env_name}          remove a provider key
   GET  /settings                      current default provider/model
@@ -95,6 +93,36 @@ if not TOKEN:
 
 LOGIN_FAILS = {}
 
+# ---- Model fallback (auto-switch) ----
+# Ordered chain of "provider/modelId". When a session's turn dies on a
+# provider error, the watchdog below switches that session to the next
+# model in the chain and prompts it to continue with full context.
+# Editable from the admin page; stored beside this file, not in Pi's
+# own settings.json.
+FALLBACK_FILE = os.path.join(BASE, "fallback.json")
+FALLBACK_DEFAULT = {"enabled": True,
+                    "chain": ["provider-a/model-1", "provider-b/model-2"]}
+LAST_SWITCH = {}
+
+
+def load_fallback():
+    try:
+        with open(FALLBACK_FILE) as f:
+            d = json.load(f)
+        chain = [c for c in d.get("chain", []) if isinstance(c, str) and "/" in c]
+        return {"enabled": bool(d.get("enabled", True)),
+                "chain": chain or list(FALLBACK_DEFAULT["chain"])}
+    except Exception:
+        return {"enabled": FALLBACK_DEFAULT["enabled"], "chain": list(FALLBACK_DEFAULT["chain"])}
+
+
+def save_fallback(cfg):
+    tmp = FALLBACK_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cfg, f, indent=2)
+    os.replace(tmp, FALLBACK_FILE)
+    return cfg
+
 # ---- RPC process management ----
 procs = {}          # session_id -> {"proc", "reader", "pending", "events", "lock", "cwd", "running"}
 procs_lock = threading.Lock()
@@ -105,6 +133,7 @@ def log_event(sid, rec):
     if p is None:
         return
     p["events"].append(rec)
+    p["last_event_at"] = time.time()
     if len(p["events"]) > 2000:
         p["events"] = p["events"][-2000:]
     try:
@@ -135,8 +164,15 @@ def reader_thread(sid):
                 t = rec.get("type", "")
                 if t in ("agent_start",):
                     p["running"] = True
+                    p["last_error"] = None
                 elif t in ("agent_end", "agent_settled"):
                     p["running"] = False
+                    p["agent_ends"] = p.get("agent_ends", 0) + 1
+                elif t == "message_end":
+                    msg = rec.get("message") or {}
+                    if msg.get("stopReason") == "error":
+                        p["last_error"] = {"error": msg.get("errorMessage") or "provider error (no message)",
+                                           "at": msg.get("timestamp")}
     except Exception:
         pass
     p["running"] = False
@@ -154,7 +190,10 @@ def spawn_rpc(sid, cwd, model=None):
     proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, bufsize=1, env=env)
     entry = {"proc": proc, "pending": {}, "events": [], "lock": threading.Lock(),
-             "cwd": cwd, "running": False, "sid": sid}
+             "cwd": cwd, "running": False, "sid": sid, "last_error": None,
+             "last_event_at": 0, "fb_handled_at": None,
+             "agent_ends": 0, "spawned_at": time.time(),
+             "ac_last_end_count": -1, "ac_unproductive": 0, "ac_fingerprint": None}
     procs[sid or "new"] = entry
     threading.Thread(target=reader_thread, args=(sid or "new",), daemon=True).start()
     return entry
@@ -185,14 +224,220 @@ def ensure_proc(sid, cwd=WORK, model=None):
     return spawn_rpc(sid, cwd, model)
 
 
-_sess_cache = {"ts": 0.0, "data": None}
-SESS_CACHE_TTL = 30.0  # /pi polls /sessions every 2-10s; don't re-scan every file each time
+FB_ERROR_HINTS = ("503", "502", "500", "upstream", "busy", "overloaded",
+                  "unavailable", "timed out", "timeout", "econnreset",
+                  "fetch failed", "socket hang", "rate limit", "429")
+
+
+def _is_provider_error(err):
+    e = (err or "").lower()
+    return any(h in e for h in FB_ERROR_HINTS)
+
+
+def _current_model(entry):
+    st = rpc_call(entry, {"type": "get_state"}, timeout=30)
+    model = ((st or {}).get("data") or {}).get("model") or {}
+    prov = model.get("provider")
+    mid = model.get("id") or model.get("modelId")
+    return (prov + "/" + mid) if prov and mid else None
+
+
+def fallback_watchdog():
+    """When a session's turn has died on a provider error and stayed idle,
+    switch it to the next model in the fallback chain and continue it."""
+    while True:
+        time.sleep(15)
+        try:
+            cfg = load_fallback()
+            if not cfg["enabled"] or len(cfg["chain"]) < 2:
+                continue
+            now = time.time()
+            for sid, entry in list(procs.items()):
+                try:
+                    if entry["proc"].poll() is not None or entry.get("running"):
+                        continue
+                    le = entry.get("last_error")
+                    if not le or entry.get("fb_handled_at") == le.get("at"):
+                        continue
+                    if not _is_provider_error(le.get("error")):
+                        entry["fb_handled_at"] = le.get("at")
+                        continue
+                    # Let Pi's own retries settle first: the error and the
+                    # session's last event must both be at least 45s old.
+                    err_at = (le.get("at") or 0) / 1000.0
+                    if (err_at and now - err_at < 45) or now - (entry.get("last_event_at") or 0) < 45:
+                        continue
+                    cur = _current_model(entry)
+                    chain = cfg["chain"]
+                    if cur in chain:
+                        idx = chain.index(cur)
+                        nxt = chain[idx + 1] if idx + 1 < len(chain) else None
+                    else:
+                        nxt = chain[0] if chain[0] != cur else None
+                    entry["fb_handled_at"] = le.get("at")
+                    if not nxt:
+                        continue
+                    prov, mid = nxt.split("/", 1)
+                    rpc_call(entry, {"type": "set_model", "provider": prov, "modelId": mid}, timeout=30)
+                    if _current_model(entry) != nxt:
+                        continue
+                    LAST_SWITCH.clear()
+                    LAST_SWITCH.update({"session": sid, "from": cur, "to": nxt, "at": int(now)})
+                    rpc_call(entry, {"type": "prompt", "message":
+                                     "Continue from where you left off. (Auto-fallback: the previous model hit a provider error, so this session was switched to " + nxt + ". You have the full conversation context.)"}, timeout=30)
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+
+# ---- Auto-continue ----
+# Pi works the master task file /root/work/agentx/TASKS.md top to bottom,
+# but a Pi turn ENDS when the session reports — after that, silence until
+# a human (or the supervisor cron, every ~30 min) nudges it. This
+# watchdog closes the gap: when a configured work session has ended a
+# turn and stayed idle a while, and TASKS.md still holds work for it,
+# the gateway sends the standard continue prompt itself. Guardrails:
+# never fire on a provider-error death (the fallback watchdog owns
+# those); never fire when no work remains (queue done, or only the
+# owner-only section is left); stop after a few consecutive continues
+# that changed nothing in TASKS.md — the session is blocked, not lazy,
+# and the supervisor cron takes it from there. Config lives beside this
+# file like fallback.json; the session ids live only in that file.
+AC_FILE = os.path.join(BASE, "autocontinue.json")
+AC_DEFAULT = {"enabled": True, "idle_seconds": 90, "max_unproductive": 3,
+              "tasks_file": "/root/work/agentx/TASKS.md", "sessions": {}}
+LAST_AUTOCONTINUE = {}
+AC_PROMPT = ("Continue from where you left off. Keep working through "
+             "/root/work/agentx/TASKS.md per its rules: finish your claimed task, "
+             "mark it [x] in the file when its definition of done is met, then claim "
+             "the next unclaimed task and keep going. Report what you finished and "
+             "what remains, then stop. (Auto-continue: you stopped with work left in "
+             "the file, so the gateway restarted you — no human sent this.)")
+
+
+def load_autocontinue():
+    try:
+        with open(AC_FILE) as f:
+            d = json.load(f)
+        sessions = d.get("sessions") or {}
+        if not isinstance(sessions, dict):
+            sessions = {}
+        return {"enabled": bool(d.get("enabled", True)),
+                "idle_seconds": max(30, int(d.get("idle_seconds", 90))),
+                "max_unproductive": max(1, int(d.get("max_unproductive", 3))),
+                "tasks_file": d.get("tasks_file") or AC_DEFAULT["tasks_file"],
+                "sessions": sessions}
+    except Exception:
+        return {"enabled": AC_DEFAULT["enabled"],
+                "idle_seconds": AC_DEFAULT["idle_seconds"],
+                "max_unproductive": AC_DEFAULT["max_unproductive"],
+                "tasks_file": AC_DEFAULT["tasks_file"], "sessions": {}}
+
+
+def save_autocontinue(cfg):
+    tmp = AC_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cfg, f, indent=2)
+    os.replace(tmp, AC_FILE)
+    return cfg
+
+
+def _ac_work_state(tasks_file, tag):
+    """Read TASKS.md; return (fingerprint, work_left) for one session tag.
+    Work left = the session's own claimed [~] task, or any unclaimed [ ]
+    task above the owner-only section. The fingerprint captures the queue
+    counts so an unchanged file across continues reads as 'blocked'."""
+    try:
+        with open(tasks_file) as f:
+            lines = f.read().splitlines()
+    except Exception:
+        return None, False
+    done = claimed_mine = unclaimed = blocked = 0
+    in_owner = False
+    for ln in lines:
+        s = ln.strip()
+        low = s.lower()
+        if s.startswith("#") and ("owner-only" in low or "do not start" in low):
+            in_owner = True
+        if s.startswith("- [x]") or s.startswith("- [X]"):
+            done += 1
+        elif s.startswith("- [!]"):
+            blocked += 1
+        elif s.startswith("- [~]"):
+            if ("(" + tag + ")") in s or ("[" + tag + "]") in s:
+                claimed_mine += 1
+        elif s.startswith("- [ ]") and not in_owner:
+            unclaimed += 1
+    return (done, claimed_mine, unclaimed, blocked), (claimed_mine > 0 or unclaimed > 0)
+
+
+def autocontinue_watchdog():
+    """When a work session's turn has ended and work remains in TASKS.md,
+    prompt it to continue — no human or cron nudge needed."""
+    while True:
+        time.sleep(15)
+        try:
+            cfg = load_autocontinue()
+            if not cfg["enabled"] or not cfg["sessions"]:
+                continue
+            now = time.time()
+            for sid, meta in list(cfg["sessions"].items()):
+                try:
+                    entry = procs.get(sid)
+                    if entry is None or entry["proc"].poll() is not None:
+                        # No live proc (e.g. the gateway restarted): resume
+                        # the session from disk so the idle gate below can
+                        # restart its work — the watchdog is the spawner of
+                        # last resort, nothing else respawns these procs.
+                        entry = ensure_proc(sid)
+                    if entry.get("running"):
+                        continue
+                    tag = (meta or {}).get("tag") or ""
+                    if not tag:
+                        continue
+                    # Provider-error deaths belong to the fallback watchdog.
+                    le = entry.get("last_error")
+                    if le and _is_provider_error(le.get("error")):
+                        continue
+                    # A turn must have ended since the last auto-continue
+                    # (a fresh proc counts once: agent_ends 0 > -1, so work
+                    # sessions also self-resume after a gateway restart).
+                    ends = entry.get("agent_ends", 0)
+                    if ends <= entry.get("ac_last_end_count", -1):
+                        continue
+                    idle_from = max(entry.get("last_event_at") or 0,
+                                    entry.get("spawned_at") or 0)
+                    if now - idle_from < cfg["idle_seconds"]:
+                        continue
+                    fp, work_left = _ac_work_state(cfg["tasks_file"], tag)
+                    if fp is None:
+                        continue
+                    entry["ac_last_end_count"] = ends
+                    if not work_left:
+                        entry["ac_unproductive"] = 0
+                        entry["ac_fingerprint"] = fp
+                        continue
+                    if entry.get("ac_fingerprint") == fp:
+                        entry["ac_unproductive"] = entry.get("ac_unproductive", 0) + 1
+                    else:
+                        entry["ac_unproductive"] = 0
+                    entry["ac_fingerprint"] = fp
+                    if entry["ac_unproductive"] >= cfg["max_unproductive"]:
+                        # Turns keep ending and the file never changes:
+                        # blocked, not lazy. Leave it for the supervisor.
+                        continue
+                    rpc_call(entry, {"type": "prompt", "message": AC_PROMPT}, timeout=30)
+                    LAST_AUTOCONTINUE.clear()
+                    LAST_AUTOCONTINUE.update({"session": sid, "tag": tag, "at": int(now),
+                                              "unproductive": entry["ac_unproductive"]})
+                except Exception:
+                    continue
+        except Exception:
+            continue
 
 
 def session_files():
-    now = time.time()
-    if _sess_cache["data"] is not None and now - _sess_cache["ts"] < SESS_CACHE_TTL:
-        return _sess_cache["data"]
     out = []
     seen = set()
     # live gateway sessions first (RPC processes) — Pi may not have
@@ -215,223 +460,27 @@ def session_files():
                 if sid in seen:
                     continue
                 seen.add(sid)
-                name, cwd, model, n = sid, "", "", 0
+                name, cwd, n = sid, "", 0
                 try:
                     with open(path) as f:
                         for line in f:
                             n += 1
-                            # Only the session header + model_change lines
-                            # carry list data; parsing every message/tool
-                            # line made a full scan take ~8s over 71 files.
-                            if ('"type":"session"' not in line
-                                    and '"type": "session"' not in line
-                                    and '"model_change"' not in line):
-                                continue
                             try:
                                 rec = json.loads(line)
                             except Exception:
                                 continue
-                            if not isinstance(rec, dict):
-                                continue
-                            if rec.get("type") == "session":
-                                if rec.get("name"):
+                            if isinstance(rec, dict):
+                                if rec.get("type") == "session" and rec.get("name"):
                                     name = rec["name"]
                                 if rec.get("cwd"):
                                     cwd = rec["cwd"]
-                            elif rec.get("type") == "model_change" and rec.get("modelId"):
-                                model = (rec.get("provider") + "/" if rec.get("provider") else "") + rec["modelId"]
                 except Exception:
                     pass
-                out.append({"id": sid, "name": name, "cwd": cwd, "model": model, "messages": n,
+                out.append({"id": sid, "name": name, "cwd": cwd, "messages": n,
                             "mtime": os.path.getmtime(path),
                             "running": sid in procs and procs[sid]["proc"].poll() is None and procs[sid]["running"]})
     out.sort(key=lambda s: s.get("mtime", 0), reverse=True)
-    _sess_cache["ts"], _sess_cache["data"] = now, out
     return out
-
-
-# ---- host / sandbox stats (for the /pi page header) ----
-CPU_MOUNT = "/sys/fs/cgroup"
-DISK_QUOTA_GB = 10.0  # the sandbox plan's disk allowance (no cgroup quota exists for it)
-_cpu_prev = {"usec": None, "ts": None}
-_ws_cache = {"bytes": None, "ts": 0.0, "busy": False}
-WS_TTL = 300.0  # refresh the /root footprint every 5 min
-
-
-def _seed_cpu():
-    """Take a baseline CPU reading at startup so the very first /stats call
-    can already return a percentage instead of null."""
-    u = _cpu_usage_usec()
-    if u is not None:
-        _cpu_prev["usec"], _cpu_prev["ts"] = u, time.time()
-
-
-def _seed_workspace():
-    """Warm the /root footprint cache in the background at startup."""
-    try:
-        _workspace_bytes(force=True)
-    except Exception:
-        pass
-
-
-def _cgroup(path, default=None):
-    try:
-        with open(os.path.join(CPU_MOUNT, path)) as f:
-            return f.read().strip()
-    except Exception:
-        return default
-
-
-def _cpu_quota_cores():
-    """cpu.max is '<quota> <period>' (e.g. '175000 100000' = 1.75 cores)."""
-    raw = _cgroup("cpu.max")
-    if not raw or raw == "max":
-        return None
-    try:
-        q, per = raw.split()
-        return int(q) / int(per)
-    except Exception:
-        return None
-
-
-def _cpu_usage_usec():
-    """Cumulative CPU time consumed by this sandbox, from cgroup cpu.stat."""
-    try:
-        with open(os.path.join(CPU_MOUNT, "cpu.stat")) as f:
-            for line in f:
-                if line.startswith("usage_usec"):
-                    return int(line.split()[1])
-    except Exception:
-        pass
-    return None
-
-
-def _read_cpu():
-    """Fallback: (busy, total) jiffies host-wide from /proc/stat."""
-    try:
-        with open("/proc/stat") as f:
-            parts = f.readline().split()
-        vals = [int(x) for x in parts[1:]]
-        idle = vals[3] + (vals[4] if len(vals) > 4 else 0)  # idle + iowait
-        return sum(vals) - idle, sum(vals)
-    except Exception:
-        return None, None
-
-
-def _workspace_bytes(force=False):
-    """Cached size of /root (the sandbox's own footprint). Refreshed by a
-    background thread because du over a few GB takes ~30s."""
-    now = time.time()
-    due = _ws_cache["bytes"] is None or (now - _ws_cache["ts"] > WS_TTL)
-    if (force or due) and not _ws_cache["busy"]:
-        _ws_cache["busy"] = True
-
-        def _work():
-            try:
-                out = subprocess.run(["du", "-sxB1", "/root"], capture_output=True,
-                                     text=True, timeout=600).stdout.split()
-                _ws_cache["bytes"] = int(out[0])
-                _ws_cache["ts"] = time.time()
-            except Exception:
-                pass
-            finally:
-                _ws_cache["busy"] = False
-
-        threading.Thread(target=_work, daemon=True).start()
-    return _ws_cache["bytes"]
-
-
-def stats_snapshot():
-    """CPU %, RAM %, disk % + the sandbox spec shown next to the bars.
-    CPU/RAM come from cgroup v2 (the real sandbox quota, not host-wide numbers)."""
-    now = time.time()
-    quota = _cpu_quota_cores()
-
-    # --- CPU: cgroup accounting over wall time, as % of the allowed cores ---
-    cpu_pct = None
-    usec = _cpu_usage_usec()
-    if usec is not None and _cpu_prev["usec"] is not None:
-        d_usec = usec - _cpu_prev["usec"]
-        d_wall = now - _cpu_prev["ts"]
-        if d_wall > 0:
-            allowed_usec = d_wall * 1e6 * (quota or (os.cpu_count() or 1))
-            cpu_pct = max(0.0, min(100.0, 100.0 * d_usec / allowed_usec))
-    if usec is not None:
-        _cpu_prev["usec"], _cpu_prev["ts"] = usec, now
-    else:
-        # fallback when cgroup accounting is unavailable: host-wide /proc/stat delta
-        busy, total = _read_cpu()
-        if busy is not None and _cpu_prev.get("hbusy") is not None:
-            d_total = total - _cpu_prev["hbusy"]
-            d_busy = busy - _cpu_prev["hbusy"]
-            if d_total > 0:
-                cpu_pct = max(0.0, min(100.0, 100.0 * d_busy / d_total))
-        if busy is not None:
-            _cpu_prev["hbusy"], _cpu_prev["htotal"] = busy, total
-
-    # --- RAM: cgroup current/max, fall back to /proc/meminfo ---
-    ram_used = ram_total = None
-    cur, mx = _cgroup("memory.current"), _cgroup("memory.max")
-    if cur and mx and mx != "max":
-        try:
-            ram_used, ram_total = int(cur), int(mx)
-        except Exception:
-            pass
-    if not ram_total:
-        try:
-            info = {}
-            with open("/proc/meminfo") as f:
-                for line in f:
-                    k, _, v = line.partition(":")
-                    info[k] = int(v.split()[0]) * 1024
-            ram_total = info.get("MemTotal")
-            ram_used = ram_total - info.get("MemAvailable", 0) if ram_total else None
-        except Exception:
-            pass
-
-    def pct(used, total):
-        if not used or not total:
-            return None
-        return max(0.0, min(100.0, 100.0 * used / total))
-
-    # --- Disk: the sandbox's own footprint vs the plan allowance ---
-    # There is no cgroup disk quota on this box (io.max is empty), and statvfs("/")
-    # reports the 845 GB host overlay, which would be meaningless next to a
-    # "10 GiB" label. So the bar is /root's real footprint over the plan quota,
-    # and the host overlay numbers are reported separately for reference.
-    disk = {"pct": None}
-    ws = _workspace_bytes()
-    quota_b = DISK_QUOTA_GB * (1024 ** 3)
-    if ws:
-        disk = {"pct": pct(ws, quota_b),
-                "used_gb": round(ws / (1024 ** 3), 2),
-                "total_gb": DISK_QUOTA_GB,
-                "basis": "workspace(/root) vs plan quota"}
-    try:
-        st = os.statvfs("/")
-        host_total = st.f_blocks * st.f_frsize
-        host_used = host_total - st.f_bavail * st.f_frsize
-        disk["host"] = {"pct": pct(host_used, host_total),
-                        "used_gb": round(host_used / 1e9, 1),
-                        "total_gb": round(host_total / 1e9, 1)}
-    except Exception:
-        pass
-
-    def gb(n):
-        return round(n / (1024 ** 3), 1) if n else None
-
-    rp = pct(ram_used, ram_total)
-    return {
-        "cpu": {"pct": None if cpu_pct is None else round(cpu_pct, 1),
-                "quota": None if not quota else round(quota * 100)},  # 175 = 1.75 cores
-        "ram": {"pct": None if rp is None else round(rp, 1),
-                "used_gb": gb(ram_used), "total_gb": gb(ram_total)},
-        "disk": disk,
-        "spec": {"ram": (str(gb(ram_total)) + " GiB") if ram_total else "6 GiB",
-                 "cpu": (str(round(quota * 100)) + "%") if quota else "175%",
-                 "disk": "10 GiB"},
-        "updated": int(now),
-    }
 
 
 # ---- models.json CRUD ----
@@ -594,6 +643,14 @@ label.chk{display:flex;gap:7px;align-items:center;cursor:pointer}
 
 <div class="card"><h2>Models</h2><div id="models"></div></div>
 
+<div class="card"><h2>Model fallback order</h2>
+<div class="mut">When a session's model hits a provider error (busy, 5xx, timeout), the session auto-switches to the next model in this order and continues with the full context. Put the models in the order you want them tried. Only models whose provider has a key can actually work.</div>
+<div class="row"><label><input type="checkbox" id="fb_enabled" onchange="fbToggle()"> Auto-switch enabled</label></div>
+<div id="fb_list"></div>
+<div class="row"><select id="fb_add" class="grow"></select><button onclick="fbAdd()">Add to order</button></div>
+<div class="mut" id="fb_last"></div>
+</div>
+
 <div class="card"><h2>Add models — the proper way</h2>
 <div class="grid">
 <input id="am_provider" placeholder="provider name (e.g. openrouter)">
@@ -642,14 +699,35 @@ async function saveTok(){const v=$('tok').value.trim();if(!v)return;
   if(r.ok){const d=await r.json();TOK=d.token;sessionStorage.setItem('pigtok',TOK);loadAll();return}}catch(e){}
  TOK=v;sessionStorage.setItem('pigtok',TOK);loadAll()}
 async function loadAll(){try{
- const [models,secrets,settings,monid,health]=await Promise.all([api('/models'),api('/secrets'),api('/settings'),api('/monid'),api('/health')]);
+ const [models,secrets,settings,monid,health,fallback]=await Promise.all([api('/models'),api('/secrets'),api('/settings'),api('/monid'),api('/health'),api('/fallback')]);
  $('loginCard').style.display='none';$('app').style.display='block';
  $('health').textContent=health.ok?'running':'?';$('health').className='badge ok';
  $('deflt').textContent='Default: '+(settings.defaultProvider||'?')+'/'+(settings.defaultModel||'?');
- renderModels(models,settings);renderKeys(secrets.secrets||[],models);
+ renderModels(models,settings);renderKeys(secrets.secrets||[],models);renderFallback(fallback,models);
  $('monidBadge').textContent=monid.set?'set':'not set';$('monidBadge').className='badge '+(monid.set?'ok':'no');
 }catch(e){$('loginCard').style.display='block';$('app').style.display='none';if(TOK)toast(e.message)}}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+let FB={enabled:true,chain:[]};
+function renderFallback(fb,models){FB={enabled:!!fb.enabled,chain:(fb.chain||[]).slice()};
+ $('fb_enabled').checked=FB.enabled;
+ const el=$('fb_list');el.innerHTML='';
+ FB.chain.forEach((c,i)=>{const row=document.createElement('div');row.className='row';
+  row.innerHTML='<span class="grow">'+(i+1)+'. '+esc(c)+'</span>';
+  const up=document.createElement('button');up.className='ghost';up.textContent='↑';up.disabled=!i;up.onclick=()=>fbMove(i,-1);
+  const dn=document.createElement('button');dn.className='ghost';dn.textContent='↓';dn.disabled=i===FB.chain.length-1;dn.onclick=()=>fbMove(i,1);
+  const rm=document.createElement('button');rm.className='ghost';rm.textContent='✕';rm.onclick=()=>fbRemove(i);
+  row.append(up,dn,rm);el.append(row)});
+ const sel=$('fb_add');sel.innerHTML='';
+ const provs=(models&&models.providers)||{};
+ Object.keys(provs).forEach(p=>{(provs[p].models||[]).forEach(m=>{const v=p+'/'+m.id;
+  if(!FB.chain.includes(v)){const o=document.createElement('option');o.value=v;o.textContent=v;sel.append(o)}})});
+ const ls=fb.lastSwitch;
+ $('fb_last').textContent=ls?('Last auto-switch: '+(ls.from||'?')+' → '+ls.to+' · '+new Date(ls.at*1000).toLocaleTimeString()):'No auto-switch yet.'}
+async function fbSave(){try{await api('/fallback',{method:'POST',body:JSON.stringify({enabled:FB.enabled,chain:FB.chain})});toast('Fallback order saved')}catch(e){toast(e.message)}}
+async function fbMove(i,d){const j=i+d;if(j<0||j>=FB.chain.length)return;const t=FB.chain[i];FB.chain[i]=FB.chain[j];FB.chain[j]=t;await fbSave();loadAll()}
+async function fbRemove(i){FB.chain.splice(i,1);await fbSave();loadAll()}
+async function fbAdd(){const v=$('fb_add').value;if(!v)return;FB.chain.push(v);await fbSave();loadAll()}
+async function fbToggle(){FB.enabled=$('fb_enabled').checked;await fbSave();loadAll()}
 function fmtN(n){if(!n)return '?';return n>=1000?Math.round(n/1000)+'k':String(n)}
 function renderModels(data,settings){const el=$('models');el.innerHTML='';
  const provs=data.providers||{};
@@ -759,37 +837,10 @@ class H(BaseHTTPRequestHandler):
 
     def _body(self):
         n = int(self.headers.get("Content-Length") or 0)
-        if not n:
-            return {}
-        try:
-            return json.loads(self.rfile.read(n) or b"{}")
-        except Exception:
-            return {}
+        return json.loads(self.rfile.read(n) or b"{}") if n else {}
 
     def do_GET(self):
-        _path = urlparse(self.path).path
-        if _path in ("/pi", "/pi.html"):
-            # Pi Chat. Served from pi.html next to this file so the page can be
-            # updated without patching Python; the shell is public and holds no
-            # secrets — every API call it makes is Bearer-authenticated.
-            body = None
-            try:
-                with open(os.path.join(BASE, "pi.html"), "rb") as f:
-                    body = f.read()
-            except Exception:
-                body = None
-            if body is None:
-                body = b"<!doctype html><meta charset=utf-8><title>Pi Chat</title>" \
-                       b"<p style='font:15px system-ui;padding:24px'>pi.html is missing on the box." \
-                       b" Copy it to /root/pi-bridge/pi.html and reload."
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        if _path == "/admin":
+        if urlparse(self.path).path == "/admin":
             # The admin page shell is public; every API call it makes is
             # Bearer-authenticated, and it contains no secrets.
             body = ADMIN_HTML.encode()
@@ -805,8 +856,6 @@ class H(BaseHTTPRequestHandler):
         q = parse_qs(u.query)
         if u.path == "/health":
             return self._json(200, {"ok": True, "sessions_running": sum(1 for p in procs.values() if p["proc"].poll() is None)})
-        if u.path == "/stats":
-            return self._json(200, stats_snapshot())
         if u.path == "/sessions":
             return self._json(200, session_files())
         if u.path == "/models":
@@ -817,6 +866,14 @@ class H(BaseHTTPRequestHandler):
             s = load_settings()
             return self._json(200, {"defaultProvider": s.get("defaultProvider"),
                                     "defaultModel": s.get("defaultModel")})
+        if u.path == "/fallback":
+            cfg = load_fallback()
+            cfg["lastSwitch"] = dict(LAST_SWITCH) if LAST_SWITCH else None
+            return self._json(200, cfg)
+        if u.path == "/autocontinue":
+            cfg = load_autocontinue()
+            cfg["lastContinue"] = dict(LAST_AUTOCONTINUE) if LAST_AUTOCONTINUE else None
+            return self._json(200, cfg)
         if u.path == "/monid":
             return self._json(200, monid_status())
         m = re.match(r"^/sessions/([^/]+)$", u.path)
@@ -832,6 +889,7 @@ class H(BaseHTTPRequestHandler):
             entry = procs.get(sid)
             last = rpc_call(entry, {"type": "get_last_assistant_text"}, timeout=30) if entry and entry["proc"].poll() is None else None
             return self._json(200, {"id": sid, "running": bool(entry and entry["running"]),
+                                    "last_error": entry.get("last_error") if entry else None,
                                     "last_assistant_text": (last or {}).get("data") if isinstance(last, dict) else last})
         m = re.match(r"^/sessions/([^/]+)/events$", u.path)
         if m:
@@ -883,6 +941,22 @@ class H(BaseHTTPRequestHandler):
             return self._json(401, {"error": "unauthorized"})
         u = urlparse(self.path)
         body = self._body()
+        if u.path == "/fallback":
+            cfg = load_fallback()
+            if isinstance(body.get("enabled"), bool):
+                cfg["enabled"] = body["enabled"]
+            if isinstance(body.get("chain"), list):
+                cfg["chain"] = [c for c in body["chain"] if isinstance(c, str) and "/" in c]
+            return self._json(200, save_fallback(cfg))
+        if u.path == "/autocontinue":
+            cfg = load_autocontinue()
+            if isinstance(body.get("enabled"), bool):
+                cfg["enabled"] = body["enabled"]
+            if isinstance(body.get("idle_seconds"), int):
+                cfg["idle_seconds"] = max(30, body["idle_seconds"])
+            if isinstance(body.get("max_unproductive"), int):
+                cfg["max_unproductive"] = max(1, body["max_unproductive"])
+            return self._json(200, save_autocontinue(cfg))
         if u.path == "/prompt":
             sid = body.get("session_id")
             cwd = body.get("cwd", WORK)
@@ -1078,15 +1152,7 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    # Seed the CPU baseline and warm the /root footprint cache so the first
-    # /stats call already returns real numbers instead of nulls.
-    _seed_cpu()
-    _seed_workspace()
     print(f"pi-gateway listening on {HOST}:{PORT}", flush=True)
-    # The /pi page polls /sessions + /stats + /events concurrently; the
-    # default listen backlog of 5 drops connections under that load and
-    # cloudflared reports them as 502s.
-    class Srv(ThreadingHTTPServer):
-        request_queue_size = 128
-        daemon_threads = True
-    Srv((HOST, PORT), H).serve_forever()
+    threading.Thread(target=fallback_watchdog, daemon=True).start()
+    threading.Thread(target=autocontinue_watchdog, daemon=True).start()
+    ThreadingHTTPServer((HOST, PORT), H).serve_forever()

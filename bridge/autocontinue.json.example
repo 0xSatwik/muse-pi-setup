@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "idle_seconds": 90,
+  "max_unproductive": 3,
+  "tasks_file": "/root/work/agentx/TASKS.md",
+  "sessions": {
+    "<session-id>": {"tag": "main"},
+    "<session-id>": {"tag": "parallel"}
+  }
+}
