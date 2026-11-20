@@ -32,7 +32,8 @@ gateway. The gateway is rebuilt against its ACP interface:
 
 | File | Purpose |
 |---|---|
-| `bridge/zs-gateway.py` | stdlib HTTP gateway, port 8766, speaks ACP to Zerostack |
+| `bridge/zs-gateway-rs/` | **Rust gateway (live since 2026-11-21)** — std HTTP server, port 8766, speaks ACP to Zerostack. 9 MB RSS vs the Python gateway's 19 MB. Build: `cargo build --release` (needs Rust on the box); binary at `/root/pi-bridge/zs-gateway`. Includes the full model system in `src/admin.html` (Add provider → Load models → tick to add → manual add → default + fallback order with Up/Down → fallback on/off) and key rotation. |
+| `bridge/zs-gateway.py` | Python gateway (backup) — same endpoints, kept in case the Rust binary is missing. `zs-supervise.sh` runs Rust when the binary exists, Python otherwise. |
 | `bridge/zs.html` | `pi.html` + a Pi \| Zerostack switcher (all pi.html fixes kept) |
 | `bridge/zs-supervise.sh` | respawn loop so `/restart` is reliable |
 
