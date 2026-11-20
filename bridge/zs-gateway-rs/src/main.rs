@@ -587,11 +587,11 @@ fn handle(app: &Arc<App>, req: &http::Request) -> http::Response {
                         .unwrap_or_default();
                     return json_ok(json!({"defaultProvider": p, "defaultModel": m}));
                 }
+                "/settings-info" => return json_ok(settings_info()),
                 "/switch" => {
                     return json_ok(json!({
                         "backend": "zerostack",
                         "url": public_url("ZS_ZS_URL", "/pi"),
-                        "pi_url": public_url("ZS_PI_URL", "http://127.0.0.1:8765/pi"),
                     }))
                 }
                 _ => {}
@@ -864,9 +864,10 @@ fn handle(app: &Arc<App>, req: &http::Request) -> http::Response {
             "/switch" => {
                 let want = body.get("backend").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
                 return match want.as_str() {
-                    "pi" => json_ok(json!({"backend": "pi", "url": public_url("ZS_PI_URL", "http://127.0.0.1:8765/pi")})),
+                    // Pi is fully removed from this server (2026-11-21). Only
+                    // Zerostack remains; switching to Pi is gone.
                     "zerostack" => json_ok(json!({"backend": "zerostack", "url": public_url("ZS_ZS_URL", "/pi")})),
-                    _ => json_err(400, "backend must be 'pi' or 'zerostack'"),
+                    _ => json_err(400, "only 'zerostack' is available — Pi was removed"),
                 };
             }
             "/restart" => {
@@ -954,6 +955,110 @@ fn handle(app: &Arc<App>, req: &http::Request) -> http::Response {
         }
         return json_err(404, "unknown route");
     }
+}
+
+/// Settings panel data for the /pi page: what Zerostack actually has.
+/// Skills come from the prompts dir, MCP servers from config.toml.
+/// Vault: the Worker URL + agent are fixed; the gateway cannot know the
+/// unlock state (only Muse holds the master secret), so the status says so.
+fn settings_info() -> Value {
+    // Zerostack version, best effort.
+    let version = std::process::Command::new("/root/.local/bin/zerostack")
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+    // Skills: prompt files in the Zerostack prompts dir.
+    let mut skills: Vec<Value> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir("/root/.local/share/zerostack/prompts") {
+        let mut names: Vec<String> = rd
+            .flatten()
+            .filter_map(|e| {
+                let n = e.file_name().to_string_lossy().to_string();
+                if n.ends_with(".md") {
+                    Some(n.trim_end_matches(".md").to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        names.sort();
+        for n in names {
+            let desc = std::fs::read_to_string(format!(
+                "/root/.local/share/zerostack/prompts/{}.md",
+                n
+            ))
+            .ok()
+            .and_then(|t| {
+                t.lines()
+                    .find(|l| {
+                        let l = l.trim();
+                        !l.is_empty() && !l.starts_with('#')
+                    })
+                    .map(|l| l.trim().to_string())
+            })
+            .unwrap_or_default();
+            skills.push(json!({"name": n, "desc": desc}));
+        }
+    }
+    // MCP servers from config.toml [mcp_servers].
+    let mut mcp: Vec<Value> = Vec::new();
+    if let Ok(text) = std::fs::read_to_string(ZS_CONFIG) {
+        if let Ok(v) = toml::from_str::<toml::Value>(&text) {
+            if let Some(servers) = v
+                .get("mcp_servers")
+                .and_then(|s| s.as_table())
+            {
+                let mut names: Vec<String> = servers.keys().cloned().collect();
+                names.sort();
+                for name in names {
+                    let s = &servers[&name];
+                    let url = s
+                        .get("url")
+                        .and_then(|u| u.as_str())
+                        .map(|u| u.to_string())
+                        .unwrap_or_default();
+                    let command = s
+                        .get("command")
+                        .and_then(|c| c.as_str())
+                        .map(|c| c.to_string())
+                        .unwrap_or_default();
+                    let target = if !url.is_empty() {
+                        url
+                    } else {
+                        command
+                    };
+                    mcp.push(json!({
+                        "name": name,
+                        "url": target,
+                        "note": "TUI only — ACP never loads MCP",
+                    }));
+                }
+            }
+        }
+    }
+    let running = acp::sessions_list()
+        .as_array()
+        .map(|a| a.len())
+        .unwrap_or(0);
+    json!({
+        "zerostack_version": version,
+        "zerostack_bin": "/root/.local/bin/zerostack",
+        "config_path": ZS_CONFIG,
+        "gateway_impl": "rust",
+        "gateway_pid": std::process::id(),
+        "sessions_running": running,
+        "acp": "gateway talks to Zerostack over ACP; the gateway owns transcripts",
+        "skills": skills,
+        "mcp": mcp,
+        "vault_url": "https://cf-d1-vault.hardeepwalia77.workers.dev",
+        "vault_agent": "zerostack-altare",
+        "vault_status": "locked unless Muse unlocked it — ask Muse to unlock for a service; vault tools work in the Zerostack terminal only",
+        "vault_keys": [],
+    })
 }
 
 fn main() {
