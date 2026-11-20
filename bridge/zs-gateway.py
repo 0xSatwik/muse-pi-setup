@@ -205,6 +205,38 @@ def provider_key_status():
     return out
 
 
+KEYS_FILE = os.path.join(BASE, "provider-keys.env")  # chmod 600, KEY=VALUE lines
+
+
+def save_secret(env_name, value):
+    """Store a provider API key in provider-keys.env (chmod 600). The value
+    is never logged or returned. Returns False on a bad env var name."""
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]*", env_name or ""):
+        return False
+    lines = {}
+    try:
+        with open(KEYS_FILE) as f:
+            for line in f:
+                if "=" in line:
+                    k, v = line.strip().split("=", 1)
+                    lines[k] = v
+    except FileNotFoundError:
+        pass
+    lines[env_name] = value
+    with open(KEYS_FILE, "w") as f:
+        for k, v in lines.items():
+            f.write(f"{k}={v}\n")
+    os.chmod(KEYS_FILE, 0o600)
+    os.environ[env_name] = value
+    return True
+
+
+def instabox_status():
+    """Whether the Instabox API key is set. No value."""
+    v = os.environ.get("INSTABOX_API_KEY")
+    return {"set": bool(v and v.strip())}
+
+
 # ---- stats (same shape and basis as pi-gateway.py) ------------------------
 CPU_MOUNT = "/sys/fs/cgroup"
 DISK_QUOTA_GB = 10.0
@@ -953,12 +985,18 @@ input{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-r
 <div class="card"><h2>Provider keys</h2><div id="keys"></div>
 <div class="note">Keys are read from the box environment (provider-keys.env and /root/.profile). Values are never shown or returned by this page.</div></div>
 
+<div class="card"><h2>Instabox API key</h2>
+<div class="row"><div class="grow">Instabox API key (ibk_…) — used by Muse to create, start, stop and SSH into the browser machine. <span id="instaboxBadge" class="badge">…</span></div></div>
+<div class="row"><input id="instabox_key" type="password" class="grow" placeholder="ibk_… key from your Instabox dashboard">
+<button onclick="setInstabox()">Save Instabox key</button></div>
+<div class="mut">Stored in provider-keys.env on the box (chmod 600). Values are never shown. The browser machine (muse-browser) is already connected; use this to add or rotate the key.</div></div>
+
 <div class="card"><h2>ACP facts for this build</h2>
 <div class="mut" style="line-height:1.7">
 • Zerostack ACP exposes only <span class="mono">initialize</span>, <span class="mono">session/new</span>, <span class="mono">session/prompt</span>.<br>
 • <span class="mono">session/cancel</span> does not exist → Stop ends the session's Zerostack process.<br>
 • No <span class="mono">session/load</span> → the gateway stores transcripts and replays a text digest after a respawn.<br>
-• MCP is disabled in ACP mode, so the vault tools are not available through this gateway.
+• MCP is disabled in ACP mode, so the vault tools are not available through this gateway. The browser MCP entry in config.toml is TUI-only; in gateway sessions the browser is driven by the <span class="mono">browser.py</span> CLI (bash) — see the browser skill.
 </div></div>
 </div></div>
 <div id="toast"></div>
@@ -975,7 +1013,8 @@ async function saveTok(){const v=$('tok').value.trim();if(!v)return;
   if(r.ok){const d=await r.json();TOK=d.token;sessionStorage.setItem('zsgtok',TOK);loadAll();return}}catch(e){}
  TOK=v;sessionStorage.setItem('zsgtok',TOK);loadAll()}
 async function loadAll(){try{
- const [health,models,keys]=await Promise.all([api('/health'),api('/models'),api('/keys')]);
+ const [health,models,keys,instabox]=await Promise.all([api('/health'),api('/models'),api('/keys'),api('/instabox-key')]);
+ $('instaboxBadge').textContent=instabox.set?'set':'not set';$('instaboxBadge').className='badge '+(instabox.set?'ok':'no');
  $('loginCard').style.display='none';$('app').style.display='block';
  $('health').textContent=health.ok?'running':'?';$('health').className='badge ok';
  $('deflt').textContent='Default: '+((models.default||{}).provider||'?')+'/'+((models.default||{}).model||'?');
@@ -994,6 +1033,8 @@ async function loadAll(){try{
   ke.appendChild(row)});
  if(!(keys.keys||[]).length)ke.innerHTML='<div class="mut">No provider keys referenced.</div>';
 }catch(e){$('loginCard').style.display='block';$('app').style.display='none';if(TOK)toast(e.message)}}
+async function setInstabox(){const v=$('instabox_key').value.trim();if(!v){toast('paste the Instabox key first');return}
+ try{await api('/instabox-key',{method:'POST',body:JSON.stringify({key:v})});toast('Instabox key saved on the box');$('instabox_key').value='';loadAll()}catch(e){toast(e.message)}}
 async function restartGw(){try{await api('/restart',{method:'POST',body:'{}'});toast('Restarting…')}catch(e){}
  for(let i=0;i<20;i++){await new Promise(r=>setTimeout(r,1500));try{const h=await fetch('/health').then(r=>r.json());if(h.ok){toast('Gateway back up');loadAll();return}}catch(e){}}toast('Gateway did not answer yet')}
 if(TOK){$('tok').value=TOK;loadAll()}
@@ -1072,6 +1113,8 @@ class H(BaseHTTPRequestHandler):
             return self._json(200, models_payload())
         if u.path == "/keys":
             return self._json(200, {"keys": provider_key_status()})
+        if u.path == "/instabox-key":
+            return self._json(200, instabox_status())
         if u.path == "/switch":
             return self._json(200, {"backend": "zerostack",
                                     "url": ZS_PUBLIC_URL or "/pi",
@@ -1138,6 +1181,14 @@ class H(BaseHTTPRequestHandler):
             return self._json(401, {"error": "unauthorized"})
         u = urlparse(self.path)
         body = self._body()
+
+        if u.path == "/instabox-key":
+            key = (body.get("key") or "").strip()
+            if not key or not key.startswith("ibk_"):
+                return self._json(400, {"error": "bad key — an Instabox API key starts with ibk_"})
+            if not save_secret("INSTABOX_API_KEY", key):
+                return self._json(400, {"error": "could not save key"})
+            return self._json(200, {"ok": True})
 
         if u.path == "/prompt":
             text = (body.get("message") or "").strip()
