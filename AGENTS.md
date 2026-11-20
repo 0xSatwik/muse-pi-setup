@@ -57,3 +57,34 @@ It starts empty and is meant to grow slowly. Don't pad it; a short, accurate fil
 - Never paste keys in chat. Keys enter via the Admin page, Muse's secure connector pages, or stdin (`pi-api.py setkey` / `--key-stdin`) only — never as arguments, never in a Pi prompt, never in a browser task.
 - Search is the combined system ONLY (TinyFish free endpoints via Monid + cf-search Worker + X via FxEmbed) — never paid Monid endpoints. DuckDuckGo was removed 2026-11-19 (returns nothing from Pi/Cloudflare). The Monid leg is load-bearing: no Monid key on a side means no search results on that side.
 - Hallmark (`nutlope/hallmark`) is the default design skill on both sides — Muse: `~/.agents/skills/hallmark` (+ `~/workspace/custom-skills/hallmark`); Pi: `/root/.pi/agent/skills/hallmark`. The `npx skills add` route fails in this environment; install by cloning `nutlope/hallmark` and copying its `skills/hallmark/` folder (see COMPLETE-SETUP.md §9).
+
+## Zerostack — live at /pi, Pi is the fallback (2026-11-20)
+- Zerostack 1.8.6 is the agent now; Pi stays installed and the tunnel
+  port is the switch (8766 Zerostack, 8765 Pi). Gateway files:
+  `bridge/zs-gateway.py`, `bridge/zs.html` (pi.html + switcher),
+  `bridge/zs-supervise.sh`; config template
+  `zerostack/config.toml.example`. Full guide: `docs/ZEROSTACK.md`.
+- **ACP has only three methods** (`initialize`, `session/new`,
+  `session/prompt`) — no cancel, load, list, resume, or set_model.
+  Sessions die with the process; the gateway owns transcripts and
+  replays a text digest. `/stop` kills the session's process.
+- **MCP is disabled in ACP mode.** Vault tools work in the Zerostack
+  TUI only, not through the gateway.
+- **Zerostack does NOT expand `${ENV}` in MCP headers**
+  (expand_env is provider-only). The live config holds the literal
+  vault token, substituted at deploy time; the template keeps the
+  placeholder. Never commit a literal token.
+- **`enable-exa-mcp` must be top-level in the TOML.** After a
+  `[table]` header it belongs to that table — the first deploy had it
+  inside `[mcp_servers.vault]` and Exa stayed on.
+- **xingchi 403 `client_not_allowed`** in Zerostack — the provider
+  only admits named coding clients. The Responses API fix does not
+  help.
+- **Switch = tunnel port change + cloudflared restart** (kill the
+  tmux session, recreate it; never restart cloudflared inside its
+  session). Verify with a fresh browser load — a search fetch can
+  serve a cached copy of the page for minutes after a repoint.
+- **The switcher's Pi button needs `ZS_PI_URL`** set to a public Pi
+  address (env at gateway startup); the default is box-local and
+  dead from a phone. Until a second hostname exists, Pi is reached
+  by the rollback port change, not the button.
